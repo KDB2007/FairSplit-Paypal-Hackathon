@@ -3,18 +3,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import type { Contribution, Project } from "@/lib/types";
+import type { Contribution, Project, ScoreMode, ScoredSplit } from "@/lib/types";
 import {
   confirmCharter,
   fetchProject,
   logContribution,
   saveSplit,
-  scoreProject,
   sendPayout,
   syncActivity,
 } from "@/lib/client";
 import { amountFor, equalSplit, hoursSplit, redistribute } from "@/lib/split";
 import { formatDate, money } from "@/lib/utils";
+import { ExplainableSplit } from "@/components/explain/explainable-split";
+import { shareFor } from "@/components/explain/split-visuals";
 import {
   Alert,
   Avatar,
@@ -100,6 +101,7 @@ export default function ProjectPage() {
         if (!active) return;
         setProject(data);
         if (data.status === "paid") setStep(3);
+        else if (data.scoredSplit) setStep(1);
         else if (data.decisions.length > 0 || data.proposals.length > 0) setStep(2);
         else if (data.contributions.length > 0) setStep(0);
       })
@@ -146,12 +148,6 @@ export default function ProjectPage() {
         .filter((c) => c.person.toLowerCase() === member.name.toLowerCase())
         .sort((a, b) => b.timestamp.localeCompare(a.timestamp)),
     }));
-  }, [project]);
-
-  const evidenceMap = useMemo(() => {
-    const map = new Map<string, Contribution>();
-    project?.contributions.forEach((c) => map.set(c.id, c));
-    return map;
   }, [project]);
 
   const whatIfRows = useMemo(() => {
@@ -232,17 +228,40 @@ export default function ProjectPage() {
     }
   }
 
-  async function onScore() {
-    const result = await run("score", () => scoreProject(projectId));
-    if (result) {
-      applyProject(result.project);
-      setStep(1);
-      setNotice(
-        result.source === "llm"
-          ? "Scored with gpt-4o-mini."
-          : "Scored with the demo-safe engine."
-      );
-    }
+  async function onContinueFromSplit(split: ScoredSplit, mode: ScoreMode) {
+    const result = await run("continue", () =>
+      saveSplit(
+        projectId,
+        split.people.map((person) => ({
+          person: person.person,
+          finalPct: shareFor(person, mode),
+          status: "proposed",
+        }))
+      )
+    );
+    if (!result) return;
+
+    applyProject(result.project);
+    const saved = result.project.decisions;
+    setDecisions(
+      saved.length > 0
+        ? saved.map((d) => ({
+            person: d.person,
+            pct: d.finalPct,
+            note: d.overrideNote ?? "",
+            status: d.status === "paid" ? "approved" : (d.status as DecisionRow["status"]),
+            locked: false,
+          }))
+        : split.people.map((person) => ({
+            person: person.person,
+            pct: shareFor(person, mode),
+            note: "",
+            status: "proposed" as const,
+            locked: false,
+          }))
+    );
+    setStep(2);
+    setNotice(`Reviewing the ${mode} split. Edit any share before approving.`);
   }
 
   function updatePct(index: number, value: string) {
@@ -586,127 +605,14 @@ export default function ProjectPage() {
 
       {/* Step 1: AI scoring */}
       {step === 1 && (
-        <div className="space-y-6">
-          <Card>
-            <CardHeader className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <CardTitle>Explainable AI split</CardTitle>
-                <p className="mt-0.5 text-sm text-slate-500">
-                  Every percentage has a plain-language reason and linked evidence.
-                </p>
-              </div>
-              <Button onClick={onScore} disabled={busy !== null}>
-                {busy === "score" ? (
-                  <>
-                    <Spinner /> Scoring…
-                  </>
-                ) : project.proposals.length ? (
-                  "Re-score with AI"
-                ) : (
-                  "Score with AI"
-                )}
-              </Button>
-            </CardHeader>
-            <CardContent>
-              {project.proposals.length === 0 ? (
-                <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 px-4 py-10 text-center">
-                  <p className="text-sm text-slate-600">
-                    Click <span className="font-semibold">Score with AI</span> to analyse{" "}
-                    {project.contributions.length} activity items across{" "}
-                    {project.members.length} members.
-                  </p>
-                  <p className="mt-1 text-xs text-slate-400">
-                    Quiet work (reviews, unblocking, client calls) is included.
-                  </p>
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  {project.proposals.map((p) => {
-                    const member = project.members.find((m) => m.name === p.person);
-                    return (
-                      <div key={p.id} className="rounded-xl border border-slate-200 p-4">
-                        <div className="flex flex-wrap items-start justify-between gap-3">
-                          <div className="flex items-center gap-3">
-                            <Avatar name={p.person} />
-                            <div>
-                              <p className="font-semibold text-slate-900">{p.person}</p>
-                              <p className="text-xs text-slate-500">
-                                {member?.role === "lead" ? "Lead" : "Member"} ·{" "}
-                                {money(amountFor(p.percentage, totalAmount))}
-                              </p>
-                            </div>
-                          </div>
-                          <div className="text-right">
-                            <p className="text-3xl font-bold text-blue-600">
-                              {p.percentage}%
-                            </p>
-                            <p className="text-xs text-slate-500">AI proposed</p>
-                          </div>
-                        </div>
-
-                        <p className="mt-3 text-sm text-slate-700">{p.reason}</p>
-
-                        <div className="mt-3 grid gap-3 sm:grid-cols-3">
-                          {[
-                            { label: "Impact", value: p.impact, tone: "blue" as const },
-                            { label: "Complexity", value: p.complexity, tone: "violet" as const },
-                            { label: "Effort", value: p.effort, tone: "amber" as const },
-                          ].map((m) => (
-                            <div key={m.label}>
-                              <div className="mb-1 flex items-center justify-between text-xs text-slate-500">
-                                <span>{m.label}</span>
-                                <span className="font-medium text-slate-700">{m.value}/10</span>
-                              </div>
-                              <Progress value={m.value * 10} tone={m.tone} />
-                            </div>
-                          ))}
-                        </div>
-
-                        <div className="mt-3 flex flex-wrap gap-1.5">
-                          {p.evidenceRefs.length === 0 && (
-                            <Badge tone="slate">No linked evidence</Badge>
-                          )}
-                          {p.evidenceRefs.map((ref) => {
-                            const item = evidenceMap.get(ref);
-                            return (
-                              <a
-                                key={ref}
-                                href={item?.evidenceUrl ?? "#"}
-                                target={item?.evidenceUrl ? "_blank" : undefined}
-                                rel="noreferrer"
-                                className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs text-slate-600 hover:border-blue-300 hover:text-blue-700"
-                                title={item?.title ?? ref}
-                              >
-                                {item ? TYPE_LABEL[item.type] : "Evidence"} ·{" "}
-                                {item?.sourceId ?? ref.slice(0, 8)}
-                              </a>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          <WhatIfCard
-            project={project}
-            mode={whatIf}
-            onMode={setWhatIf}
-            rows={whatIfRows}
-          />
-
-          <div className="flex flex-wrap justify-between gap-3">
-            <Button variant="outline" onClick={() => setStep(0)}>
-              ← Contributions
-            </Button>
-            <Button size="lg" onClick={() => setStep(2)} disabled={project.proposals.length === 0}>
-              Review & approve →
-            </Button>
-          </div>
-        </div>
+        <ExplainableSplit
+          project={project}
+          split={project.scoredSplit ?? null}
+          onProjectUpdate={applyProject}
+          onBack={() => setStep(0)}
+          onContinue={onContinueFromSplit}
+          continuing={busy === "continue"}
+        />
       )}
 
       {/* Step 2: Review */}

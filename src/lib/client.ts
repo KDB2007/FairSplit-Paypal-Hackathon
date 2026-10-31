@@ -1,4 +1,4 @@
-import type { Project, ProjectSummary } from "./types";
+import type { Project, ProjectSummary, ScoredSplit } from "./types";
 
 async function json<T>(res: Response): Promise<T> {
   const data = await res.json().catch(() => ({}));
@@ -64,6 +64,7 @@ export async function logContribution(input: {
 
 export async function scoreProject(projectId: string): Promise<{
   project: Project;
+  split: ScoredSplit;
   source: "llm" | "canned";
 }> {
   const res = await fetch("/api/score", {
@@ -71,7 +72,7 @@ export async function scoreProject(projectId: string): Promise<{
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ projectId }),
   });
-  return json<{ project: Project; source: "llm" | "canned" }>(res);
+  return json<{ project: Project; split: ScoredSplit; source: "llm" | "canned" }>(res);
 }
 
 export async function saveSplit(
