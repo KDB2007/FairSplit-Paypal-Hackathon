@@ -5,7 +5,8 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import type { Project } from "@/lib/types";
 import { fetchProject } from "@/lib/client";
-import { amountFor, equalSplit, hoursSplit } from "@/lib/split";
+import { equalSplit, hoursSplit } from "@/lib/split";
+import { allocate } from "@/lib/layers";
 import { formatDateTime, money } from "@/lib/utils";
 import {
   Alert,
@@ -36,25 +37,23 @@ export default function DashboardPage() {
   }, [projectId]);
 
   const rows = useMemo(() => {
-    if (!project) return [] as Array<{ person: string; pct: number }>;
-    if (mode === "equal") return equalSplit(project.members);
-    if (mode === "hours") return hoursSplit(project);
-    if (project.decisions.length) {
-      return project.decisions.map((d) => ({ person: d.person, pct: d.finalPct }));
-    }
-    return project.proposals.map((p) => ({ person: p.person, pct: p.percentage }));
+    if (!project) return [] as Array<{ person: string; pct: number; amount: number }>;
+    const source =
+      mode === "equal"
+        ? equalSplit(project.members)
+        : mode === "hours"
+          ? hoursSplit(project)
+          : project.decisions.length
+            ? project.decisions.map((d) => ({ person: d.person, pct: d.finalPct }))
+            : project.proposals.map((p) => ({ person: p.person, pct: p.percentage }));
+    // Percentages are of the work pool; amounts include any charter fees.
+    const cents = allocate(project, source);
+    return source.map((r, i) => ({ ...r, amount: cents[i].totalCents / 100 }));
   }, [project, mode]);
 
   const slices: Slice[] = useMemo(
-    () =>
-      project
-        ? rows.map((r) => ({
-            name: r.person,
-            value: r.pct,
-            amount: amountFor(r.pct, project.totalAmount),
-          }))
-        : [],
-    [rows, project]
+    () => rows.map((r) => ({ name: r.person, value: r.pct, amount: r.amount })),
+    [rows]
   );
 
   if (error) {
@@ -200,7 +199,7 @@ export default function DashboardPage() {
                     <div className="mb-1 flex items-center justify-between text-sm">
                       <span className="font-medium text-slate-700">{row.person}</span>
                       <span className="text-slate-600">
-                        {row.pct}% · {money(amountFor(row.pct, project.totalAmount))}
+                        {row.pct}% · {money(row.amount)}
                       </span>
                     </div>
                     <Progress value={row.pct} tone={index % 2 === 0 ? "blue" : "emerald"} />
@@ -250,7 +249,7 @@ export default function DashboardPage() {
                             <div>
                               <p className="font-medium text-slate-800">{p.person}</p>
                               <p className="text-xs text-slate-500">
-                                {decision ? `${decision.finalPct}%` : ""}
+                                {decision ? `${decision.finalPct}% of work pool` : ""}
                               </p>
                             </div>
                           </div>

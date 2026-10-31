@@ -21,7 +21,22 @@ useful, 3 = solid contribution to a deliverable, 4 = major deliverable or
 meaningful unblocking, 5 = critical (won the client, unblocked the whole
 project, shipped the core feature). Complexity scale: 1 = trivial, 2 = routine,
 3 = moderate, 4 = hard, 5 = exceptional. Set is_quiet_work true for review,
-unblocking, client_comms, admin, planning. Return only JSON matching the schema.`;
+unblocking, client_comms, admin, planning.
+
+Return ONLY a JSON object with this exact shape — no other keys, no prose:
+{
+  "contributions": [
+    {
+      "id": "<the id string exactly as given in the input>",
+      "category": "<one of: code, review, design, client_comms, unblocking, admin, planning>",
+      "impact": <integer 1-5>,
+      "complexity": <integer 1-5>,
+      "is_quiet_work": <true or false>,
+      "rationale": "<plain-text reason, at most 20 words>"
+    }
+  ]
+}
+Include exactly one object per input contribution id, covering every id given, in any order.`;
 
 export const STEP3_SYSTEM = `You explain a split of a fixed project payment to the team that did the work.
 You are given each person's already-computed percentages and their strongest
@@ -30,11 +45,30 @@ Do not change the numbers, recompute them, or state different ones; refer to
 them qualitatively. Cite only contribution IDs that appear in the input for
 that person. Mention quiet work (review, unblocking, client communication,
 admin, planning) when it materially shaped someone's share. Each reason must be
-at most two sentences. Return only JSON matching the schema.`;
+at most two sentences.
 
+Return ONLY a JSON object with this exact shape — no other keys, no prose:
+{
+  "people": [
+    {
+      "person": "<the person's name exactly as given in the input>",
+      "reason": "<plain-text explanation, at most two sentences>",
+      "evidence_ids": ["<contribution id from that person's top_contributions>", "..."]
+    }
+  ]
+}
+Include exactly one object per person given, in any order.`;
+
+/**
+ * OPENAI_BASE_URL lets this point at an OpenAI-compatible proxy (e.g.
+ * OpenRouter's https://openrouter.ai/api/v1) instead of api.openai.com.
+ * When set, OPENAI_MODEL must use that provider's model id
+ * (OpenRouter: "openai/gpt-4o-mini", not "gpt-4o-mini").
+ */
 function client(): OpenAI {
   return new OpenAI({
     apiKey: process.env.OPENAI_API_KEY,
+    baseURL: process.env.OPENAI_BASE_URL || undefined,
     timeout: LLM_TIMEOUT_MS,
     maxRetries: 0,
   });

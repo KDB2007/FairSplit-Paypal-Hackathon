@@ -5,17 +5,19 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import type { Contribution, Project, ScoreMode, ScoredSplit } from "@/lib/types";
 import {
-  confirmCharter,
   fetchProject,
   logContribution,
   saveSplit,
   sendPayout,
   syncActivity,
 } from "@/lib/client";
-import { amountFor, equalSplit, hoursSplit, redistribute } from "@/lib/split";
+import { equalSplit, hoursSplit, redistribute } from "@/lib/split";
+import { allocate, payableAllocations } from "@/lib/layers";
+import { CharterPanel } from "@/components/charter-panel";
+import { SourcesPanel } from "@/components/sources-panel";
 import { formatDate, money } from "@/lib/utils";
 import { ExplainableSplit } from "@/components/explain/explainable-split";
-import { shareFor } from "@/components/explain/split-visuals";
+import { PoolWaterfall, shareFor } from "@/components/explain/split-visuals";
 import {
   Alert,
   Avatar,
@@ -47,6 +49,7 @@ const STATUS_TONE: Record<string, "slate" | "blue" | "emerald" | "amber" | "viol
 const TYPE_TONE: Record<Contribution["type"], "blue" | "emerald" | "violet" | "slate"> = {
   commit: "blue",
   pr: "blue",
+  review: "slate",
   trello: "emerald",
   manual: "violet",
 };
@@ -54,6 +57,7 @@ const TYPE_TONE: Record<Contribution["type"], "blue" | "emerald" | "violet" | "s
 const TYPE_LABEL: Record<Contribution["type"], string> = {
   commit: "GitHub commit",
   pr: "GitHub PR",
+  review: "PR review",
   trello: "Trello",
   manual: "Manual",
 };
@@ -141,36 +145,57 @@ export default function ProjectPage() {
   }, []);
 
   const contributionsByPerson = useMemo(() => {
-    if (!project) return [] as Array<{ person: string; items: Contribution[] }>;
-    return project.members.map((member) => ({
-      person: member.name,
-      items: project.contributions
-        .filter((c) => c.person.toLowerCase() === member.name.toLowerCase())
-        .sort((a, b) => b.timestamp.localeCompare(a.timestamp)),
-    }));
+    if (!project) return [] as Array<{ person: string; items: Contribution[]; unmatched?: boolean }>;
+    // Synced items carry a memberId; manual and legacy items fall back to the name.
+    const owner = (c: Contribution) =>
+      project.members.find((m) => m.id === c.memberId) ??
+      (c.externalAuthor ? undefined : project.members.find((m) => m.name.toLowerCase() === c.person.toLowerCase()));
+    const newestFirst = (a: Contribution, b: Contribution) => b.timestamp.localeCompare(a.timestamp);
+    const groups: Array<{ person: string; items: Contribution[]; unmatched?: boolean }> = project.members.map(
+      (member) => ({
+        person: member.name,
+        items: project.contributions.filter((c) => owner(c)?.id === member.id).sort(newestFirst),
+      })
+    );
+    const unmatched = project.contributions.filter((c) => !owner(c)).sort(newestFirst);
+    if (unmatched.length > 0) groups.push({ person: "Unmatched", items: unmatched, unmatched: true });
+    return groups;
   }, [project]);
 
   const whatIfRows = useMemo(() => {
     if (!project) return [] as Array<{ person: string; pct: number; amount: number }>;
-    if (whatIf === "equal") {
-      return equalSplit(project.members).map((r) => ({
-        ...r,
-        amount: amountFor(r.pct, project.totalAmount),
-      }));
-    }
-    if (whatIf === "hours") {
-      return hoursSplit(project).map((r) => ({
-        ...r,
-        amount: amountFor(r.pct, project.totalAmount),
-      }));
-    }
-    const source = project.decisions.length
-      ? project.decisions.map((d) => ({ person: d.person, pct: d.finalPct }))
-      : project.proposals.map((p) => ({ person: p.person, pct: p.percentage }));
-    return source.map((r) => ({ ...r, amount: amountFor(r.pct, project.totalAmount) }));
+    const source =
+      whatIf === "equal"
+        ? equalSplit(project.members)
+        : whatIf === "hours"
+          ? hoursSplit(project)
+          : project.decisions.length
+            ? project.decisions.map((d) => ({ person: d.person, pct: d.finalPct }))
+            : project.proposals.map((p) => ({ person: p.person, pct: p.percentage }));
+    // Percentages are of the work pool; amounts include any charter fees.
+    const cents = allocate(project, source);
+    return source.map((r, i) => ({ ...r, amount: cents[i].totalCents / 100 }));
   }, [project, whatIf]);
 
   const totalDecisionPct = decisions.reduce((s, d) => s + d.pct, 0);
+
+  // Live cents for the review rows: fixed charter fees + work-pool slice.
+  const reviewAllocations = useMemo(
+    () =>
+      project
+        ? allocate(project, decisions.map((d) => ({ person: d.person, pct: d.pct })))
+        : [],
+    [project, decisions]
+  );
+
+  const payable = useMemo(
+    () => (project ? payableAllocations(project, project.decisions) : []),
+    [project]
+  );
+
+  const scoringUnlocked = Boolean(
+    project?.poolConfig && project.members.every((m) => m.confirmed)
+  );
 
   async function run<T>(key: string, action: () => Promise<T>): Promise<T | null> {
     setBusy(key);
@@ -186,23 +211,32 @@ export default function ProjectPage() {
     }
   }
 
-  async function onConfirmCharter() {
-    const next = await run("charter", () => confirmCharter(projectId));
-    if (next) {
-      applyProject(next);
-      setNotice("Charter confirmed — everyone is in.");
-    }
+  function onCharterUpdate(next: Project) {
+    setError(null);
+    applyProject(next);
+    // A new charter version discards scoring, so send the user back to the start.
+    if (!next.scoredSplit && next.decisions.length === 0 && step > 0) setStep(0);
+    setNotice(
+      next.members.every((m) => m.confirmed)
+        ? "Charter confirmed by everyone — scoring is unlocked."
+        : `Charter v${next.charterVersion}: ${next.members.filter((m) => m.confirmed).length}/${next.members.length} confirmed.`
+    );
   }
 
   async function onSync(source: "github" | "trello" | "both") {
     const result = await run(`sync-${source}`, () => syncActivity(projectId, source));
     if (result) {
       applyProject(result.project);
-      setNotice(
-        result.synced > 0
-          ? `Synced ${result.synced} new activity items.`
-          : "No new activity found."
-      );
+      const { report } = result;
+      const parts = [
+        report.mode === "demo" ? "Sample activity (DEMO_MODE)" : null,
+        `Added ${report.added}, updated ${report.updated}`,
+        report.unmatched.length > 0
+          ? `${report.unmatched.length} ${report.unmatched.length === 1 ? "person" : "people"} to map in Sources`
+          : null,
+      ].filter(Boolean);
+      setNotice(parts.join(" · ") + ".");
+      if (report.errors.length > 0) setError(report.errors.join(" "));
     }
   }
 
@@ -415,16 +449,6 @@ export default function ProjectPage() {
         <div className="mt-4 flex flex-wrap items-center gap-3">
           <Stepper steps={STEPS} current={step} />
         </div>
-        {project.status === "draft" && (
-          <Alert tone="warning" title="Charter not confirmed" >
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <span>All members must confirm the charter before scoring.</span>
-              <Button size="sm" onClick={onConfirmCharter} disabled={busy === "charter"}>
-                {busy === "charter" ? <Spinner /> : "Confirm charter"}
-              </Button>
-            </div>
-          </Alert>
-        )}
       </div>
 
       {notice && (
@@ -438,27 +462,25 @@ export default function ProjectPage() {
         </div>
       )}
 
-      {/* Members strip */}
-      <Card className="mb-6">
-        <CardContent className="flex flex-wrap items-center gap-3 py-3">
-          {project.members.map((m) => (
-            <div key={m.id} className="flex items-center gap-2 rounded-lg border border-slate-200 px-2.5 py-1.5">
-              <Avatar name={m.name} className="h-7 w-7 text-[10px]" />
-              <div className="text-xs">
-                <p className="font-medium text-slate-800">{m.name}</p>
-                <p className="text-slate-500">
-                  {m.role === "lead" ? "Lead" : "Member"} ·{" "}
-                  {m.confirmed ? "confirmed" : "pending"}
-                </p>
-              </div>
-            </div>
-          ))}
-        </CardContent>
-      </Card>
+      <CharterPanel
+        key={`${project.id}:${project.charterVersion}`}
+        project={project}
+        onProjectUpdate={onCharterUpdate}
+        onError={setError}
+      />
 
       {/* Step 0: Contributions */}
       {step === 0 && (
         <div className="space-y-6">
+          <SourcesPanel
+            project={project}
+            onProjectUpdate={(next) => {
+              setError(null);
+              applyProject(next);
+            }}
+            onError={setError}
+          />
+
           <Card>
             <CardHeader className="flex flex-wrap items-center justify-between gap-3">
               <div>
@@ -481,12 +503,18 @@ export default function ProjectPage() {
             </CardHeader>
             <CardContent>
               <div className="space-y-4">
-                {contributionsByPerson.map(({ person, items }) => (
-                  <div key={person}>
+                {contributionsByPerson.map(({ person, items, unmatched }) => (
+                  <div key={unmatched ? "__unmatched" : person}>
                     <div className="mb-2 flex items-center justify-between">
                       <div className="flex items-center gap-2">
-                        <Avatar name={person} className="h-7 w-7 text-[10px]" />
-                        <span className="text-sm font-semibold text-slate-800">{person}</span>
+                        {unmatched ? (
+                          <Badge tone="amber">Unmatched</Badge>
+                        ) : (
+                          <Avatar name={person} className="h-7 w-7 text-[10px]" />
+                        )}
+                        <span className="text-sm font-semibold text-slate-800">
+                          {unmatched ? "Not mapped to a member — scored as unassigned" : person}
+                        </span>
                       </div>
                       <span className="text-xs text-slate-500">
                         {items.length} item{items.length === 1 ? "" : "s"} ·{" "}
@@ -505,6 +533,12 @@ export default function ProjectPage() {
                             <span className="min-w-0 flex-1 truncate text-sm text-slate-700">
                               {c.title}
                             </span>
+                            {unmatched && c.externalAuthor && (
+                              <span className="text-xs text-slate-500">{c.externalAuthor.label}</span>
+                            )}
+                            {c.linesChanged != null && c.linesChanged > 0 && (
+                              <span className="text-xs text-slate-500">±{c.linesChanged}</span>
+                            )}
                             {c.hours != null && (
                               <span className="text-xs text-slate-500">{c.hours}h</span>
                             )}
@@ -595,8 +629,13 @@ export default function ProjectPage() {
             </CardContent>
           </Card>
 
-          <div className="flex justify-end">
-            <Button size="lg" onClick={() => setStep(1)}>
+          <div className="flex flex-wrap items-center justify-end gap-3">
+            {!scoringUnlocked && (
+              <span className="text-sm text-amber-700">
+                Every member must confirm the charter before scoring.
+              </span>
+            )}
+            <Button size="lg" onClick={() => setStep(1)} disabled={!scoringUnlocked}>
               Next: AI scoring →
             </Button>
           </div>
@@ -604,6 +643,16 @@ export default function ProjectPage() {
       )}
 
       {/* Step 1: AI scoring */}
+      {step === 1 &&
+        project.scoredSplit &&
+        project.lastSync &&
+        project.lastSync.at > project.scoredSplit.generatedAt && (
+          <div className="mb-4">
+            <Alert tone="warning" title="New activity since scoring">
+              Activity was synced after this split was scored. Re-score to include it.
+            </Alert>
+          </div>
+        )}
       {step === 1 && (
         <ExplainableSplit
           project={project}
@@ -622,8 +671,9 @@ export default function ProjectPage() {
             <CardHeader>
               <CardTitle>Review the split</CardTitle>
               <p className="mt-0.5 text-sm text-slate-500">
-                AI proposes, you decide. Edited shares are pinned — the rest rescale
-                to keep the total at exactly 100%.
+                AI proposes, you decide. Shares are of the work pool — charter fees are
+                fixed and paid on top. Edited shares are pinned; the rest rescale to keep
+                the work pool at exactly 100%.
               </p>
             </CardHeader>
             <CardContent>
@@ -635,16 +685,26 @@ export default function ProjectPage() {
                 <div className="space-y-4">
                   {decisions.map((d, index) => {
                     const proposal = project.proposals.find((p) => p.person === d.person);
+                    const cents = reviewAllocations[index];
+                    const feeCents = cents ? cents.finderCents + cents.leadCents : 0;
                     return (
                       <div key={d.person} className="rounded-xl border border-slate-200 p-4">
                         <div className="flex flex-wrap items-center justify-between gap-3">
                           <div className="flex items-center gap-3">
                             <Avatar name={d.person} />
                             <div>
-                              <p className="font-semibold text-slate-900">{d.person}</p>
+                              <p className="flex items-center gap-1.5 font-semibold text-slate-900">
+                                {d.person}
+                                {cents?.finderCents ? <Badge tone="amber">Finder</Badge> : null}
+                                {cents?.leadCents ? <Badge tone="violet">Lead</Badge> : null}
+                              </p>
                               <p className="text-xs text-slate-500">
                                 AI proposed {proposal ? `${proposal.percentage}%` : "—"} ·{" "}
-                                {money(amountFor(d.pct, totalAmount))}
+                                {money((cents?.workCents ?? 0) / 100)} work
+                                {feeCents > 0 && ` + ${money(feeCents / 100)} fees`} ={" "}
+                                <span className="font-semibold text-slate-700">
+                                  {money((cents?.totalCents ?? 0) / 100)}
+                                </span>
                               </p>
                             </div>
                           </div>
@@ -659,6 +719,7 @@ export default function ProjectPage() {
                                   value={d.pct}
                                   onChange={(e) => updatePct(index, e.target.value)}
                                   className="pr-7 text-right font-semibold"
+                                  aria-label={`${d.person}'s share of the work pool`}
                                 />
                                 <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-xs text-slate-400">
                                   %
@@ -722,7 +783,7 @@ export default function ProjectPage() {
                   })}
 
                   <div className="flex items-center justify-between rounded-lg bg-slate-50 px-4 py-3 text-sm">
-                    <span className="text-slate-600">Total</span>
+                    <span className="text-slate-600">Work pool total</span>
                     <span
                       className={
                         Math.abs(totalDecisionPct - 100) < 0.5
@@ -731,7 +792,8 @@ export default function ProjectPage() {
                       }
                     >
                       {Math.round(totalDecisionPct * 100) / 100}% ·{" "}
-                      {money((totalDecisionPct / 100) * totalAmount)}
+                      {money(reviewAllocations.reduce((sum, a) => sum + a.totalCents, 0) / 100)}{" "}
+                      paid in total
                     </span>
                   </div>
 
@@ -753,6 +815,23 @@ export default function ProjectPage() {
               )}
             </CardContent>
           </Card>
+
+          {decisions.length > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle>Where the money goes</CardTitle>
+                <p className="mt-0.5 text-sm text-slate-500">
+                  Charter fees come off the top; the rest is split by the shares above.
+                </p>
+              </CardHeader>
+              <CardContent>
+                <PoolWaterfall
+                  totalCents={Math.round(totalAmount * 100)}
+                  rows={reviewAllocations}
+                />
+              </CardContent>
+            </Card>
+          )}
 
           <WhatIfCard
             project={project}
@@ -794,30 +873,39 @@ export default function ProjectPage() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
-                        {project.decisions
-                          .filter((d) => d.status !== "disputed")
-                          .map((d) => {
-                            const member = project.members.find((m) => m.name === d.person);
-                            return (
-                              <tr key={d.id}>
-                                <td className="px-3 py-2">
-                                  <div className="flex items-center gap-2">
-                                    <Avatar name={d.person} className="h-7 w-7 text-[10px]" />
-                                    <div>
-                                      <p className="font-medium text-slate-800">{d.person}</p>
-                                      <p className="text-xs text-slate-500">
-                                        {member?.email || "no email"}
-                                      </p>
-                                    </div>
+                        {payable.map((line) => {
+                          const member = project.members.find((m) => m.name === line.person);
+                          const decision = project.decisions.find((d) => d.person === line.person);
+                          const fees = line.finderCents + line.leadCents;
+                          return (
+                            <tr key={line.person}>
+                              <td className="px-3 py-2">
+                                <div className="flex items-center gap-2">
+                                  <Avatar name={line.person} className="h-7 w-7 text-[10px]" />
+                                  <div>
+                                    <p className="font-medium text-slate-800">{line.person}</p>
+                                    <p className="text-xs text-slate-500">
+                                      {member?.email || "no email"}
+                                    </p>
                                   </div>
-                                </td>
-                                <td className="px-3 py-2 text-slate-600">{d.finalPct}%</td>
-                                <td className="px-3 py-2 text-right font-semibold text-slate-900">
-                                  {money(amountFor(d.finalPct, totalAmount))}
-                                </td>
-                              </tr>
-                            );
-                          })}
+                                </div>
+                              </td>
+                              <td className="px-3 py-2 text-slate-600">
+                                {decision?.status === "disputed"
+                                  ? "disputed — fees only"
+                                  : `${line.workPct}% of work pool`}
+                                {fees > 0 && (
+                                  <span className="block text-xs text-slate-400">
+                                    + {money(fees / 100)} charter fees
+                                  </span>
+                                )}
+                              </td>
+                              <td className="px-3 py-2 text-right font-semibold text-slate-900">
+                                {money(line.totalCents / 100)}
+                              </td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                       <tfoot className="bg-slate-50">
                         <tr>
@@ -825,14 +913,7 @@ export default function ProjectPage() {
                             Total
                           </td>
                           <td className="px-3 py-2 text-right font-bold text-slate-900">
-                            {money(
-                              project.decisions
-                                .filter((d) => d.status !== "disputed")
-                                .reduce(
-                                  (s, d) => s + amountFor(d.finalPct, totalAmount),
-                                  0
-                                )
-                            )}
+                            {money(payable.reduce((sum, line) => sum + line.totalCents, 0) / 100)}
                           </td>
                         </tr>
                       </tfoot>
@@ -906,7 +987,10 @@ export default function ProjectPage() {
                             <Spinner /> Sending payouts…
                           </>
                         ) : (
-                          <>Send payouts via PayPal — {money(totalAmount)}</>
+                          <>
+                            Send payouts via PayPal —{" "}
+                            {money(payable.reduce((sum, line) => sum + line.totalCents, 0) / 100)}
+                          </>
                         )}
                       </Button>
                     )}

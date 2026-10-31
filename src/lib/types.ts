@@ -14,7 +14,7 @@ export type ProjectStatus =
 
 export type MemberRole = "lead" | "member";
 
-export type ContribType = "commit" | "pr" | "trello" | "manual";
+export type ContribType = "commit" | "pr" | "review" | "trello" | "manual";
 
 export type ManualWorkType =
   | "work"
@@ -27,12 +27,40 @@ export type DecisionStatus = "proposed" | "approved" | "disputed" | "paid";
 
 export type PayoutStatus = "pending" | "completed" | "failed";
 
+export interface PoolConfig {
+  version: number;
+  finderBps: number;        // 0–1500 (0–15%), basis points integer
+  finderMemberId: string | null;
+  leadBps: number;          // 0–1000 (0–10%), basis points integer
+  leadMemberId: string | null;
+  workPhilosophy: SplitPhilosophy;
+}
+
 export interface Member {
   id: string;
   name: string;
   email: string;
   role: MemberRole;
   confirmed: boolean;
+  /** Set to true if this member created the project (first member). */
+  isProjectCreator?: boolean;
+  /** GitHub login used to attribute synced PRs, commits and reviews. */
+  githubLogin?: string;
+  /** Trello member id used to attribute synced cards. */
+  trelloMemberId?: string;
+  /** Trello username, for display only. */
+  trelloUsername?: string;
+}
+
+export type IntegrationSource = "github" | "trello";
+
+/** Who did the work in the source system — kept so a later mapping can re-attribute it. */
+export interface ExternalAuthor {
+  source: IntegrationSource;
+  /** GitHub login or Trello member id. */
+  id: string;
+  /** Human-readable handle (GitHub login / Trello username or full name). */
+  label: string;
 }
 
 export interface Contribution {
@@ -51,6 +79,8 @@ export interface Contribution {
   prRef?: string; // links a commit to the PR that shipped it
   isMerge?: boolean; // dropped by normalize
   trivial?: boolean; // whitespace / typo only, dropped by normalize
+  /** Set on synced items; absent on manual work. */
+  externalAuthor?: ExternalAuthor;
 }
 
 export interface SplitProposal {
@@ -70,7 +100,12 @@ export interface SplitDecision {
   id: string;
   projectId: string;
   person: string;
+  /** Share of the WORK POOL (charter fees excluded). Decisions sum to 100. */
   finalPct: number;
+  /** Charter fees (finder + lead) owed to this person, in cents. */
+  feeCents: number;
+  /** Fees + work-pool slice, in cents. Decisions sum to the project total. */
+  amountCents: number;
   overrideNote?: string;
   status: DecisionStatus;
 }
@@ -84,6 +119,14 @@ export interface Payout {
   paypalTxnId?: string;
   status: PayoutStatus;
   receiptUrl?: string;
+  /** How this payout splits across the pool layers, in cents. */
+  breakdown: PayoutBreakdown;
+}
+
+export interface PayoutBreakdown {
+  finderCents: number;
+  leadCents: number;
+  workCents: number;
 }
 
 export interface Project {
@@ -100,6 +143,29 @@ export interface Project {
   createdAt: string;
   /** Last Explainable Split result, persisted so a reload keeps the screen. */
   scoredSplit?: ScoredSplit;
+  /** Pool configuration for layered splitting (set after charter step 2). */
+  poolConfig?: PoolConfig;
+  /** ISO timestamp when all members last confirmed the charter. */
+  charterConfirmedAt?: string;
+  /** Charter version — increments on any edit to the pool config. */
+  charterVersion: number;
+  /** Where real activity is synced from. Tokens live in server env, never here. */
+  sources?: ProjectSources;
+  lastSync?: { at: string; report: SyncReport };
+}
+
+export interface ProjectSources {
+  github?: { repos: string[]; since?: string };
+  trello?: { boardId: string; doneListPattern?: string };
+}
+
+export interface SyncReport {
+  mode: "live" | "demo";
+  added: number;
+  updated: number;
+  /** External handles with no mapped member, and how many items each owns. */
+  unmatched: Array<ExternalAuthor & { count: number }>;
+  errors: string[];
 }
 
 export interface ProjectSummary {
@@ -206,6 +272,15 @@ export interface UnassignedContribution {
 /** Integer cents per mode — never floating point money. */
 export type AmountsByMode = Record<ScoreMode, number>;
 
+/** The charter's fixed fees and the remaining work pool, in cents. */
+export interface LayerAmounts {
+  finderCents: number;
+  leadCents: number;
+  workPoolCents: number;
+  finderMemberId: string | null;
+  leadMemberId: string | null;
+}
+
 export interface MeritRange {
   minMeritPct: number;
   maxMeritPct: number;
@@ -214,11 +289,14 @@ export interface MeritRange {
 export interface ScoredPerson {
   memberId: string;
   person: string;
-  meritPct: number;
-  hybridPct: number;
-  hoursPct: number;
-  equalPct: number;
+  meritPct: number;           // % of work pool only
+  hybridPct: number;          // % of work pool only
+  hoursPct: number;           // % of work pool only
+  equalPct: number;           // % of work pool only
+  /** Total cents per mode: charter fees + work-pool slice. Sums to the project total. */
   amountsByMode: AmountsByMode;
+  /** Work-pool cents only, per mode. */
+  workAmountsByMode: AmountsByMode;
   reason: string;
   evidenceIds: string[];
   hiddenContributor: boolean;
@@ -227,6 +305,10 @@ export interface ScoredPerson {
   quietValueSharePct: number;
   valueByCategory: Partial<Record<ContributionCategory, number>>;
   range?: MeritRange;
+  /** Finder fee in cents (0 unless this person is the charter's finder). */
+  finderAmountCents: number;
+  /** Lead fee in cents (0 unless this person is the charter's lead). */
+  leadAmountCents: number;
 }
 
 export interface ScoreFormula {
@@ -246,6 +328,8 @@ export interface ScoredSplit {
   projectId: string;
   totalAmountCents: number;
   currency: "USD";
+  /** Charter fees carved off the top; people's mode percentages apply to workPoolCents. */
+  layers: LayerAmounts;
   defaultMode: ScoreMode;
   confidence: Confidence;
   people: ScoredPerson[];

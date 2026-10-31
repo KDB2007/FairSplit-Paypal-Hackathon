@@ -184,11 +184,13 @@ export function SplitDonut({
   mode,
   colors,
   totalCents,
+  caption = "total payout",
 }: {
   people: ScoredPerson[];
   mode: ScoreMode;
   colors: Record<string, string>;
   totalCents: number;
+  caption?: string;
 }) {
   const data = people.map((person) => ({
     name: person.person,
@@ -268,7 +270,7 @@ export function SplitDonut({
           <span className="mt-1 text-xl font-bold tracking-tight text-slate-900">
             {money(totalCents / 100)}
           </span>
-          <span className="mt-0.5 text-[10px] text-slate-400">total payout</span>
+          <span className="mt-0.5 text-[10px] text-slate-400">{caption}</span>
         </div>
       </div>
 
@@ -290,6 +292,113 @@ export function SplitDonut({
       <p className="mt-3 text-center text-[10px] leading-relaxed text-slate-400">
         Dashed ticks mark where an equal split would divide the ring.
       </p>
+    </div>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* Pool waterfall                                                             */
+/* -------------------------------------------------------------------------- */
+
+export interface WaterfallRow {
+  person: string;
+  finderCents: number;
+  leadCents: number;
+  workCents: number;
+}
+
+/**
+ * Total → charter fees → work pool → people. Fees come off the top and are
+ * fixed by the charter; the work pool is what the AI scored and humans edited.
+ */
+export function PoolWaterfall({
+  totalCents,
+  rows,
+}: {
+  totalCents: number;
+  rows: WaterfallRow[];
+}) {
+  const finder = rows.filter((row) => row.finderCents > 0);
+  const lead = rows.filter((row) => row.leadCents > 0);
+  const finderCents = finder.reduce((sum, row) => sum + row.finderCents, 0);
+  const leadCents = lead.reduce((sum, row) => sum + row.leadCents, 0);
+  const workCents = rows.reduce((sum, row) => sum + row.workCents, 0);
+  const unpaidCents = Math.max(0, totalCents - finderCents - leadCents - workCents);
+  const pct = (cents: number) => (totalCents > 0 ? (cents / totalCents) * 100 : 0);
+
+  const segments = [
+    { key: "finder", label: `Finder fee${finder.length ? ` · ${finder.map((r) => r.person).join(", ")}` : ""}`, cents: finderCents, className: "bg-amber-400" },
+    { key: "lead", label: `Lead fee${lead.length ? ` · ${lead.map((r) => r.person).join(", ")}` : ""}`, cents: leadCents, className: "bg-violet-400" },
+    { key: "work", label: "Work pool", cents: workCents, className: "bg-blue-500" },
+    { key: "held", label: "Withheld (disputed)", cents: unpaidCents, className: "bg-slate-300" },
+  ].filter((segment) => segment.cents > 0);
+
+  return (
+    <div>
+      <div
+        className="flex h-3 w-full overflow-hidden rounded-full bg-slate-100"
+        role="img"
+        aria-label={segments.map((s) => `${s.label} ${money(s.cents / 100)}`).join(", ")}
+      >
+        {segments.map((segment) => (
+          <div
+            key={segment.key}
+            className={cn("h-full", segment.className)}
+            style={{ width: `${pct(segment.cents)}%` }}
+          />
+        ))}
+      </div>
+      <ul className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-600">
+        {segments.map((segment) => (
+          <li key={segment.key} className="flex items-center gap-1.5">
+            <span className={cn("h-2 w-2 rounded-full", segment.className)} aria-hidden />
+            {segment.label}
+            <span className="font-semibold tabular-nums text-slate-800">
+              {money(segment.cents / 100)}
+            </span>
+          </li>
+        ))}
+      </ul>
+
+      <table className="mt-4 w-full text-sm">
+        <thead className="text-left text-xs uppercase tracking-wide text-slate-400">
+          <tr>
+            <th className="py-1.5 font-medium">Person</th>
+            <th className="py-1.5 text-right font-medium">Fees</th>
+            <th className="py-1.5 text-right font-medium">Work pool</th>
+            <th className="py-1.5 text-right font-medium">Total</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-slate-100">
+          {rows.map((row) => {
+            const fees = row.finderCents + row.leadCents;
+            return (
+              <tr key={row.person}>
+                <td className="py-1.5 text-slate-700">{row.person}</td>
+                <td className="py-1.5 text-right tabular-nums text-slate-500">
+                  {fees > 0 ? money(fees / 100) : "—"}
+                </td>
+                <td className="py-1.5 text-right tabular-nums text-slate-500">
+                  {money(row.workCents / 100)}
+                </td>
+                <td className="py-1.5 text-right font-semibold tabular-nums text-slate-900">
+                  {money((fees + row.workCents) / 100)}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+        <tfoot>
+          <tr className="border-t border-slate-200">
+            <td className="py-1.5 font-medium text-slate-700" colSpan={3}>
+              Total
+            </td>
+            <td className="py-1.5 text-right font-bold tabular-nums text-slate-900">
+              {money((finderCents + leadCents + workCents) / 100)}
+            </td>
+          </tr>
+        </tfoot>
+      </table>
     </div>
   );
 }

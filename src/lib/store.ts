@@ -2,13 +2,17 @@ import type {
   Contribution,
   Member,
   Payout,
+  PoolConfig,
   Project,
+  ProjectSources,
   ProjectSummary,
   SplitDecision,
   SplitPhilosophy,
   SplitProposal,
 } from "./types";
-import { amountFor, normalizePercentages, round2 } from "./split";
+import { normalizePercentages } from "./split";
+import { allocate, defaultPoolConfig, payableAllocations } from "./layers";
+import { reattribute, unmatchedAuthors } from "./integrations/identity";
 
 /**
  * In-memory store. A singleton Map lives on globalThis so it survives
@@ -72,6 +76,8 @@ export interface CreateProjectInput {
     email: string;
     role?: "lead" | "member";
     confirmed?: boolean;
+    githubLogin?: string;
+    trelloUsername?: string;
   }>;
 }
 
@@ -83,9 +89,15 @@ export function createProject(input: CreateProjectInput): Project {
     role: m.role ?? (index === 0 ? "lead" : "member"),
     // Lead is confirmed by default so the demo can move forward.
     confirmed: m.confirmed ?? (index === 0 || m.role === "lead"),
+    isProjectCreator: index === 0,
+    // Self-reported; the Trello username is resolved to its member id on
+    // first sync, matched against the board (lib/integrations/identity.ts).
+    githubLogin: m.githubLogin,
+    trelloUsername: m.trelloUsername,
   }));
 
   const allConfirmed = members.every((m) => m.confirmed);
+  const now = new Date().toISOString();
 
   const project: Project = {
     id: newId("prj"),
@@ -98,21 +110,79 @@ export function createProject(input: CreateProjectInput): Project {
     proposals: [],
     decisions: [],
     payouts: [],
-    createdAt: new Date().toISOString(),
+    createdAt: now,
+    charterVersion: 1,
+    // No fees until the team sets them; the whole amount is the work pool.
+    poolConfig: defaultPoolConfig(input.philosophy),
+    charterConfirmedAt: allConfirmed ? now : undefined,
   };
 
   return saveProject(project);
 }
 
+function refreshCharterStatus(project: Project): void {
+  const allConfirmed = project.members.every((m) => m.confirmed);
+  project.charterConfirmedAt = allConfirmed
+    ? (project.charterConfirmedAt ?? new Date().toISOString())
+    : undefined;
+  if (project.status === "draft" && allConfirmed) project.status = "charter_confirmed";
+  if (project.status === "charter_confirmed" && !allConfirmed) project.status = "draft";
+}
+
+/** Confirm the charter on behalf of every member (demo shortcut). */
 export function confirmCharter(projectId: string): Project | undefined {
   const project = store.get(projectId);
   if (!project) return undefined;
   project.members = project.members.map((m) => ({ ...m, confirmed: true }));
-  project.status = project.status === "draft" ? "charter_confirmed" : project.status;
+  refreshCharterStatus(project);
   return saveProject(project);
 }
 
-// Pure split maths live in ./split so they can safely be imported by client code.
+/** Confirm or withdraw one member's sign-off on the current charter version. */
+export function setMemberConfirmation(
+  projectId: string,
+  memberId: string,
+  confirmed: boolean
+): Project | undefined {
+  const project = store.get(projectId);
+  if (!project) return undefined;
+  project.members = project.members.map((m) =>
+    m.id === memberId ? { ...m, confirmed } : m
+  );
+  refreshCharterStatus(project);
+  return saveProject(project);
+}
+
+/**
+ * Replace the pool config. Any change is a new charter version, so every
+ * member's confirmation is reset and any earlier scoring is discarded — the
+ * old split was computed against different fees.
+ */
+export function updatePoolConfig(
+  projectId: string,
+  config: Omit<PoolConfig, "version">
+): Project | undefined {
+  const project = store.get(projectId);
+  if (!project) return undefined;
+  if (project.status === "paid") return project;
+
+  project.charterVersion = (project.charterVersion ?? 1) + 1;
+  project.poolConfig = { ...config, version: project.charterVersion };
+  project.members = project.members.map((m) => ({ ...m, confirmed: false }));
+  project.charterConfirmedAt = undefined;
+  project.scoredSplit = undefined;
+  project.proposals = [];
+  project.decisions = [];
+  project.status = "draft";
+
+  return saveProject(project);
+}
+
+/** Scoring needs a pool config and every member signed off on it. */
+export function isScoringUnlocked(project: Project): boolean {
+  return Boolean(project.poolConfig) && project.members.every((m) => m.confirmed);
+}
+
 export {
   amountFor,
   equalSplit,
@@ -503,6 +573,16 @@ export function seedDemoProject(): Project {
     decisions: [],
     payouts: [],
     createdAt: new Date().toISOString(),
+    charterVersion: 1,
+    poolConfig: {
+      version: 1,
+      finderBps: 1000,      // 10%
+      finderMemberId: "mem_priya",
+      leadBps: 500,         // 5%
+      leadMemberId: "mem_priya",
+      workPhilosophy: "merit",
+    },
+    charterConfirmedAt: new Date().toISOString(),
   };
 
   return saveProject(project);
@@ -515,71 +595,70 @@ export function getOrCreateDemo(): Project {
 }
 
 /* -------------------------------------------------------------------------- */
-/* Contribution sync (demo mocks)                                             */
+/* Integrations: sources + identities                                         */
 /* -------------------------------------------------------------------------- */
 
-const GITHUB_MOCK_TITLES = [
-  "Add loading states to dashboard",
-  "Refactor invoice calculations",
-  "Wire up receipt PDF export",
-  "Improve error handling on payout API",
-];
-
-const TRELLO_MOCK_TITLES = [
-  "Moved 'QA checklist' to Done",
-  "Moved 'Copywriting pass' to Done",
-  "Moved 'Accessibility audit' to Done",
-];
-
-export function syncContributions(
-  projectId: string,
-  source: "github" | "trello" | "both"
-): Contribution[] {
+export function updateSources(projectId: string, sources: ProjectSources): Project | undefined {
   const project = store.get(projectId);
-  if (!project) return [];
+  if (!project) return undefined;
+  project.sources = sources;
+  return saveProject(project);
+}
 
-  const created: Contribution[] = [];
-  const people = project.members.map((m) => m.name);
+export type IdentityResult =
+  | { ok: true; project: Project }
+  | { ok: false; status: number; error: string };
 
-  if (source === "github" || source === "both") {
-    GITHUB_MOCK_TITLES.forEach((title, i) => {
-      const person = people[i % people.length];
-      const isPr = i % 2 === 1;
-      const sourceId = isPr ? `#${50 + i}` : newId("sha");
-      created.push({
-        id: newId("con"),
-        projectId,
-        person,
-        type: isPr ? "pr" : "commit",
-        sourceId,
-        title,
-        timestamp: new Date().toISOString(),
-        evidenceUrl: isPr
-          ? `https://github.com/fairsplit/demo/pull/${50 + i}`
-          : `https://github.com/fairsplit/demo/commit/${sourceId}`,
-      });
-    });
+/**
+ * Map a member to their GitHub login / Trello member id, then re-attribute
+ * every synced item so earlier syncs pick up the mapping without refetching.
+ * Pass an empty string to clear a handle.
+ */
+export function setMemberIdentity(
+  projectId: string,
+  memberId: string,
+  identity: { githubLogin?: string; trelloMemberId?: string; trelloUsername?: string }
+): IdentityResult {
+  const project = store.get(projectId);
+  if (!project) return { ok: false, status: 404, error: "Project not found." };
+  const member = project.members.find((m) => m.id === memberId);
+  if (!member) return { ok: false, status: 404, error: "Member not found." };
+
+  const clash = (pick: (m: Member) => string | undefined, value: string | undefined) =>
+    value
+      ? project.members.find(
+          (m) => m.id !== memberId && pick(m)?.toLowerCase() === value.toLowerCase()
+        )
+      : undefined;
+
+  const github = identity.githubLogin?.trim();
+  const trello = identity.trelloMemberId?.trim();
+  const githubClash = clash((m) => m.githubLogin, github);
+  if (githubClash) {
+    return { ok: false, status: 409, error: `${github} is already mapped to ${githubClash.name}.` };
+  }
+  const trelloClash = clash((m) => m.trelloMemberId, trello);
+  if (trelloClash) {
+    return { ok: false, status: 409, error: `That Trello member is already mapped to ${trelloClash.name}.` };
   }
 
-  if (source === "trello" || source === "both") {
-    TRELLO_MOCK_TITLES.forEach((title, i) => {
-      const person = people[(i + 1) % people.length];
-      created.push({
-        id: newId("con"),
-        projectId,
-        person,
-        type: "trello",
-        sourceId: newId("card"),
-        title,
-        timestamp: new Date().toISOString(),
-        evidenceUrl: `https://trello.com/c/${newId("card")}`,
-      });
-    });
+  if (identity.githubLogin !== undefined) member.githubLogin = github || undefined;
+  if (identity.trelloMemberId !== undefined) {
+    member.trelloMemberId = trello || undefined;
+    member.trelloUsername = trello ? identity.trelloUsername?.trim() || undefined : undefined;
   }
 
-  project.contributions.push(...created);
-  saveProject(project);
-  return created;
+  project.contributions = reattribute(project.contributions, project.members);
+  if (project.lastSync) {
+    project.lastSync = {
+      ...project.lastSync,
+      report: {
+        ...project.lastSync.report,
+        unmatched: unmatchedAuthors(project.contributions, project.members),
+      },
+    };
+  }
+  return { ok: true, project: saveProject(project) };
 }
 
 /* -------------------------------------------------------------------------- */
@@ -592,17 +671,33 @@ export interface PayoutResult {
   simulated: boolean;
 }
 
+export interface PayoutLine {
+  person: string;
+  email: string;
+  amountCents: number;
+  breakdown: Payout["breakdown"];
+}
+
+export function payoutLines(project: Project): PayoutLine[] {
+  return payableAllocations(project, project.decisions).map((a) => ({
+    person: a.person,
+    email: project.members.find((m) => m.name === a.person)?.email ?? "",
+    amountCents: a.totalCents,
+    breakdown: { finderCents: a.finderCents, leadCents: a.leadCents, workCents: a.workCents },
+  }));
+}
+
 export function buildPayouts(
   project: Project,
   batchId: string,
-  simulated: boolean
+  simulated: boolean,
+  lines: PayoutLine[] = payoutLines(project)
 ): Payout[] {
-  const approved = project.decisions.filter((d) => d.status !== "disputed");
-  return approved.map((d, index) => ({
+  return lines.map((line, index) => ({
     id: newId("pay"),
     projectId: project.id,
-    person: d.person,
-    amount: amountFor(d.finalPct, project.totalAmount),
+    person: line.person,
+    amount: line.amountCents / 100,
     paypalBatchId: batchId,
     paypalTxnId: `TXN${(index + 1).toString().padStart(4, "0")}${Math.random()
       .toString(36)
@@ -610,6 +705,28 @@ export function buildPayouts(
       .toUpperCase()}`,
     status: simulated ? ("completed" as const) : ("pending" as const),
     receiptUrl: `/receipt/${project.id}`,
+    breakdown: line.breakdown,
+  }));
+}
+
+/**
+ * Work-pool percentages → decisions with cents attached. Percentages are
+ * normalised to 100 across the work pool; charter fees are never touched here.
+ */
+function withAmounts(
+  project: Project,
+  rows: Array<Omit<SplitDecision, "feeCents" | "amountCents">>
+): SplitDecision[] {
+  const pcts = normalizePercentages(rows.map((r) => r.finalPct));
+  const allocations = allocate(
+    project,
+    rows.map((r, i) => ({ person: r.person, pct: pcts[i] }))
+  );
+  return rows.map((r, i) => ({
+    ...r,
+    finalPct: pcts[i],
+    feeCents: allocations[i].finderCents + allocations[i].leadCents,
+    amountCents: allocations[i].totalCents,
   }));
 }
 
@@ -618,25 +735,27 @@ export function applyDecisions(
   decisions: Array<{ person: string; finalPct: number; overrideNote?: string; status?: string }>
 ): { project: Project; decisions: SplitDecision[] } {
   const existing = new Map(project.decisions.map((d) => [d.person, d]));
-  const normalized = normalizePercentages(decisions.map((d) => d.finalPct));
 
-  const next: SplitDecision[] = decisions.map((d, i) => {
-    const prior = existing.get(d.person);
-    const status =
-      d.status === "disputed"
-        ? "disputed"
-        : d.status === "approved"
-          ? "approved"
-          : (prior?.status ?? "proposed");
-    return {
-      id: prior?.id ?? newId("dec"),
-      projectId: project.id,
-      person: d.person,
-      finalPct: normalized[i],
-      overrideNote: d.overrideNote ?? prior?.overrideNote,
-      status: status as SplitDecision["status"],
-    };
-  });
+  const next = withAmounts(
+    project,
+    decisions.map((d) => {
+      const prior = existing.get(d.person);
+      const status =
+        d.status === "disputed"
+          ? "disputed"
+          : d.status === "approved"
+            ? "approved"
+            : (prior?.status ?? "proposed");
+      return {
+        id: prior?.id ?? newId("dec"),
+        projectId: project.id,
+        person: d.person,
+        finalPct: Number(d.finalPct),
+        overrideNote: d.overrideNote ?? prior?.overrideNote,
+        status: status as SplitDecision["status"],
+      };
+    })
+  );
 
   project.decisions = next;
   const allResolved = next.every(
@@ -652,14 +771,16 @@ export function applyDecisions(
 }
 
 export function proposalsToDecisions(project: Project): SplitDecision[] {
-  const pcts = normalizePercentages(project.proposals.map((p) => p.percentage));
-  project.decisions = project.proposals.map((p, i) => ({
-    id: newId("dec"),
-    projectId: project.id,
-    person: p.person,
-    finalPct: pcts[i],
-    status: "proposed",
-  }));
+  project.decisions = withAmounts(
+    project,
+    project.proposals.map((p) => ({
+      id: newId("dec"),
+      projectId: project.id,
+      person: p.person,
+      finalPct: p.percentage,
+      status: "proposed" as const,
+    }))
+  );
   saveProject(project);
   return project.decisions;
 }

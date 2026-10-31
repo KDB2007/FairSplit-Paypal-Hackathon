@@ -208,7 +208,7 @@ export function ExplainableSplit({
 
   const hidden = liveSplit?.people.find((person) => person.hiddenContributor) ?? null;
   const hiddenShortfallCents = hidden
-    ? hidden.amountsByMode.merit - hidden.amountsByMode.equal
+    ? hidden.workAmountsByMode.merit - hidden.workAmountsByMode.equal
     : 0;
 
   const sheetPerson =
@@ -466,7 +466,12 @@ export function ExplainableSplit({
                 people={liveSplit.people}
                 mode={mode}
                 colors={colors}
-                totalCents={liveSplit.totalAmountCents}
+                totalCents={liveSplit.layers.workPoolCents}
+                caption={
+                  liveSplit.layers.workPoolCents < liveSplit.totalAmountCents
+                    ? "work pool (after charter fees)"
+                    : "total payout"
+                }
               />
               <p className="mt-3 border-t border-slate-100 pt-3 text-center text-xs leading-relaxed text-slate-500">
                 {MODE_HINT[mode]}
@@ -669,8 +674,13 @@ function MemberCard({
           <p className="mt-1 text-sm font-semibold tabular-nums text-slate-700">
             {money(amountCents / 100)}
           </p>
+          {person.finderAmountCents + person.leadAmountCents > 0 && (
+            <p className="text-[10px] tabular-nums text-slate-500">
+              incl. {money((person.finderAmountCents + person.leadAmountCents) / 100)} charter fees
+            </p>
+          )}
           <p className="text-[10px] uppercase tracking-wide text-slate-400">
-            {MODE_LABEL[mode]}
+            {MODE_LABEL[mode]} · of work pool
           </p>
         </div>
       </div>

@@ -15,6 +15,7 @@ import { applyJudgments, buildScoredContributions, medianJudgments, topEvidenceI
 import { normalizeContributions } from "./normalize";
 import { explainOnce, judgeWithRetry, type ExplainPersonInput } from "./llm";
 import { toCents } from "./rounding";
+import { layerAmounts } from "../layers";
 
 /**
  * Server orchestrator: normalize → judge ×3 → compute → explain → confidence.
@@ -40,6 +41,10 @@ export function isDemoMode(): boolean {
 }
 
 function defaultMode(project: Project): ScoreMode {
+  // Use work philosophy from poolConfig if available, else fall back to project.philosophy
+  if (project.poolConfig?.workPhilosophy) {
+    return project.poolConfig.workPhilosophy;
+  }
   if (project.philosophy === "equal") return "equal";
   if (project.philosophy === "hybrid") return "hybrid";
   return "merit";
@@ -110,6 +115,9 @@ export async function scoreProjectExplainable(project: Project): Promise<ScoredS
   const totalAmountCents = toCents(project.totalAmount);
   const members = project.members.map((member) => ({ id: member.id, name: member.name }));
 
+  // Charter fees come off the top; the AI-scored modes only divide the work pool.
+  const layers = layerAmounts(totalAmountCents, project.poolConfig);
+
   const computeInput = {
     totalAmountCents,
     members,
@@ -124,6 +132,7 @@ export async function scoreProjectExplainable(project: Project): Promise<ScoredS
     })),
     categoryWeights: CATEGORY_WEIGHTS,
     hybridWeights: HYBRID_WEIGHTS,
+    layers,
   };
 
   const computed = computeSplit(computeInput);
@@ -264,6 +273,7 @@ export async function scoreProjectExplainable(project: Project): Promise<ScoredS
     projectId: project.id,
     totalAmountCents,
     currency: "USD",
+    layers: computed.layers,
     defaultMode: defaultMode(project),
     confidence: confidence.confidence,
     people,
@@ -274,16 +284,20 @@ export async function scoreProjectExplainable(project: Project): Promise<ScoredS
   };
 }
 
-/** Convenience for the API layer: proposals from a chosen mode. */
+/**
+ * Convenience for the API layer: each person's share of the WORK POOL under a
+ * mode. Charter fees are fixed and never part of these percentages.
+ */
 export function modePercentages(split: ScoredSplit, mode: ScoreMode) {
   return split.people.map((person) => ({
     person: person.person,
-    percentage: mode === "equal"
-      ? person.equalPct
-      : mode === "merit"
-        ? person.meritPct
-        : mode === "hybrid"
-          ? person.hybridPct
-          : person.hoursPct,
+    percentage:
+      mode === "equal"
+        ? person.equalPct
+        : mode === "merit"
+          ? person.meritPct
+          : mode === "hybrid"
+            ? person.hybridPct
+            : person.hoursPct,
   }));
 }

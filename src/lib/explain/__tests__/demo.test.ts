@@ -110,6 +110,30 @@ describe("demo scoring pipeline", () => {
     });
   });
 
+  it("takes the charter's fees off the top and scores only the work pool", async () => {
+    const project = seedDemoProject();
+    const split = await scoreProjectExplainable(project);
+    // Demo charter: 10% finder + 5% lead, both to Priya.
+    expect(split.layers).toMatchObject({
+      finderCents: 30_000,
+      leadCents: 15_000,
+      workPoolCents: 255_000,
+      finderMemberId: "mem_priya",
+      leadMemberId: "mem_priya",
+    });
+    for (const mode of ["equal", "merit", "hybrid", "hours"] as const) {
+      const work = split.people.reduce((sum, p) => sum + p.workAmountsByMode[mode], 0);
+      expect(work).toBe(255_000);
+      const pct = split.people.reduce(
+        (sum, p) => sum + { equal: p.equalPct, merit: p.meritPct, hybrid: p.hybridPct, hours: p.hoursPct }[mode],
+        0
+      );
+      expect(Math.round(pct * 100)).toBe(10_000);
+    }
+    const priya = split.people.find((p) => p.person === "Priya")!;
+    expect(priya.amountsByMode.merit - priya.workAmountsByMode.merit).toBe(45_000);
+  });
+
   it("gives every active person at least one valid evidence chip", async () => {
     const project = seedDemoProject();
     const split = await scoreProjectExplainable(project);
@@ -179,6 +203,7 @@ describe("edge cases", () => {
     decisions: [],
     payouts: [],
     createdAt: new Date().toISOString(),
+    charterVersion: 1,
     ...overrides,
   });
 

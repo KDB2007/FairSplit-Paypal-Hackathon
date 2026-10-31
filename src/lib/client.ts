@@ -1,4 +1,4 @@
-import type { Project, ProjectSummary, ScoredSplit } from "./types";
+import type { PoolConfig, Project, ProjectSummary, ScoredSplit, SyncReport } from "./types";
 
 async function json<T>(res: Response): Promise<T> {
   const data = await res.json().catch(() => ({}));
@@ -25,7 +25,14 @@ export async function createProject(input: {
   name: string;
   totalAmount: number;
   philosophy: string;
-  members: Array<{ name: string; email: string; role: string; confirmed: boolean }>;
+  members: Array<{
+    name: string;
+    email: string;
+    role: string;
+    confirmed: boolean;
+    githubLogin?: string;
+    trelloUsername?: string;
+  }>;
 }): Promise<Project> {
   const res = await fetch("/api/projects", {
     method: "POST",
@@ -38,13 +45,51 @@ export async function createProject(input: {
 export async function syncActivity(
   projectId: string,
   source: "github" | "trello" | "both"
-): Promise<{ project: Project; synced: number }> {
+): Promise<{ project: Project; synced: number; report: SyncReport }> {
   const res = await fetch("/api/contributions/sync", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ projectId, source }),
   });
-  return json<{ project: Project; synced: number }>(res);
+  return json<{ project: Project; synced: number; report: SyncReport }>(res);
+}
+
+export async function saveSources(
+  projectId: string,
+  input: {
+    github: { repos: string; since?: string } | null;
+    trello: { board: string; doneListPattern?: string } | null;
+  }
+): Promise<Project> {
+  const res = await fetch(`/api/projects/${projectId}/sources`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  return (await json<{ project: Project }>(res)).project;
+}
+
+export interface SourcesTestResult {
+  status: { demoMode: boolean; githubToken: boolean; trello: boolean };
+  github?: { ok: boolean; error?: string; people: Array<{ id: string; label: string }> };
+  trello?: { ok: boolean; error?: string; doneLists: string[]; people: Array<{ id: string; label: string }> };
+}
+
+export async function testSources(projectId: string): Promise<SourcesTestResult> {
+  const res = await fetch(`/api/projects/${projectId}/sources/test`, { cache: "no-store" });
+  return json<SourcesTestResult>(res);
+}
+
+export async function setIdentity(
+  projectId: string,
+  input: { memberId: string; githubLogin?: string; trelloMemberId?: string; trelloUsername?: string }
+): Promise<Project> {
+  const res = await fetch(`/api/projects/${projectId}/identities`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  return (await json<{ project: Project }>(res)).project;
 }
 
 export async function logContribution(input: {
@@ -111,6 +156,32 @@ export async function sendPayout(projectId: string): Promise<{
   }>(res);
 }
 
+export async function savePoolConfig(
+  projectId: string,
+  poolConfig: Omit<PoolConfig, "version">
+): Promise<Project> {
+  const res = await fetch(`/api/projects/${projectId}/pool-config`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ poolConfig }),
+  });
+  return (await json<{ project: Project }>(res)).project;
+}
+
+export async function setMemberConfirmation(
+  projectId: string,
+  memberId: string,
+  confirmed: boolean
+): Promise<Project> {
+  const res = await fetch(`/api/projects/${projectId}/confirm-charter`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ memberId, action: confirmed ? "confirm" : "unconfirm" }),
+  });
+  return (await json<{ project: Project }>(res)).project;
+}
+
+/** Confirms on behalf of every member — demo shortcut. */
 export async function confirmCharter(projectId: string): Promise<Project> {
   const res = await fetch(`/api/projects/${projectId}`, {
     method: "PATCH",

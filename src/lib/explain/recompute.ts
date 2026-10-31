@@ -56,6 +56,8 @@ export function recomputeWithAssignments(
       complexity: contribution.complexity,
       hours: contribution.hours,
     })),
+    // Same charter fees as the server run, so browser and server agree to the cent.
+    layers: split.layers,
   });
 
   const values = computed.values;

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { amountFor, getProject, listProjects, summarise } from "@/lib/store";
+import { getProject, listProjects, summarise } from "@/lib/store";
+import { allocate } from "@/lib/layers";
 import type { Payout } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -17,17 +18,14 @@ export async function GET(request: Request) {
     );
   }
 
-  const chartData = (project.decisions.length
-    ? project.decisions
-    : project.proposals.map((p) => ({
-        person: p.person,
-        finalPct: p.percentage,
-        status: "proposed",
-      }))
-  ).map((d) => ({
-    person: d.person,
-    percentage: "finalPct" in d ? d.finalPct : 0,
-    amount: amountFor("finalPct" in d ? d.finalPct : 0, project.totalAmount),
+  const source = project.decisions.length
+    ? project.decisions.map((d) => ({ person: d.person, pct: d.finalPct }))
+    : project.proposals.map((p) => ({ person: p.person, pct: p.percentage }));
+  // percentage = share of the work pool; amount = charter fees + work slice.
+  const chartData = allocate(project, source).map((a) => ({
+    person: a.person,
+    percentage: a.workPct,
+    amount: a.totalCents / 100,
   }));
 
   const payoutHistory = project.payouts.map((p: Payout) => ({

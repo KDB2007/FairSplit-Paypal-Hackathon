@@ -6,6 +6,7 @@ import { useParams } from "next/navigation";
 import type { Project } from "@/lib/types";
 import { fetchProject } from "@/lib/client";
 import { formatDateTime, money } from "@/lib/utils";
+import { PoolWaterfall } from "@/components/explain/split-visuals";
 import {
   Alert,
   Badge,
@@ -49,7 +50,8 @@ export default function ReceiptPage() {
   }
 
   const lead = project.members.find((m) => m.role === "lead") ?? project.members[0];
-  const total = project.payouts.reduce((s, p) => s + p.amount, 0);
+  const totalCents = project.payouts.reduce((s, p) => s + Math.round(p.amount * 100), 0);
+  const total = totalCents / 100;
   const batchId = project.payouts[0]?.paypalBatchId ?? "—";
 
   return (
@@ -141,7 +143,17 @@ export default function ReceiptPage() {
                           <p className="text-xs text-slate-500">{member?.email}</p>
                         </td>
                         <td className="py-2.5 text-slate-600">
-                          {decision ? `${decision.finalPct}%` : "—"}
+                          {decision?.status === "disputed"
+                            ? "fees only"
+                            : decision
+                              ? `${decision.finalPct}% of work pool`
+                              : "—"}
+                          {p.breakdown && p.breakdown.finderCents + p.breakdown.leadCents > 0 && (
+                            <span className="block text-xs text-slate-400">
+                              + {money((p.breakdown.finderCents + p.breakdown.leadCents) / 100)}{" "}
+                              charter fees
+                            </span>
+                          )}
                         </td>
                         <td className="py-2.5 font-mono text-xs text-slate-500">
                           {p.paypalTxnId}
@@ -167,10 +179,28 @@ export default function ReceiptPage() {
             </table>
           </div>
 
+          {project.payouts.length > 0 && (
+            <div className="border-t border-slate-200 py-6">
+              <p className="mb-3 text-xs uppercase tracking-wide text-slate-400">
+                Breakdown (charter v{project.charterVersion})
+              </p>
+              <PoolWaterfall
+                totalCents={Math.round(project.totalAmount * 100)}
+                rows={project.payouts.map((p) => ({
+                  person: p.person,
+                  finderCents: p.breakdown?.finderCents ?? 0,
+                  leadCents: p.breakdown?.leadCents ?? 0,
+                  workCents: p.breakdown?.workCents ?? Math.round(p.amount * 100),
+                }))}
+              />
+            </div>
+          )}
+
           <div className="border-t border-slate-200 pt-4 text-xs text-slate-400">
             <p>
-              Sandbox demonstration — no real money was transferred. Every split
-              percentage was AI-proposed and human-approved in FairSplit.
+              Sandbox demonstration — no real money was transferred. Charter fees were
+              agreed by every member up front; every work-pool share was AI-proposed and
+              human-approved in FairSplit.
             </p>
             <p className="mt-1">
               Project status: {project.status} · Philosophy: {project.philosophy}

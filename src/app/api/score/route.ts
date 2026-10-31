@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import type { Project, ScoreMode, SplitProposal } from "@/lib/types";
-import { getProject, proposalsToDecisions, saveProject } from "@/lib/store";
+import { getProject, proposalsToDecisions, saveProject, isScoringUnlocked } from "@/lib/store";
 import {
   ScoreError,
   modePercentages,
@@ -63,6 +63,17 @@ export async function POST(request: Request) {
   const project = projectId ? getProject(projectId) : undefined;
   if (!project) {
     return NextResponse.json({ error: "Project not found." }, { status: 404 });
+  }
+
+  // Check if scoring is unlocked (all members confirmed + poolConfig exists)
+  if (!isScoringUnlocked(project)) {
+    return NextResponse.json(
+      { 
+        error: "Scoring is locked. All members must confirm the charter and pool configuration must be set.",
+        code: "SCORING_LOCKED" 
+      },
+      { status: 400 }
+    );
   }
 
   try {

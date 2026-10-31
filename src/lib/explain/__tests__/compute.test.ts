@@ -8,6 +8,7 @@ import {
   type ComputeContribution,
 } from "../compute";
 import { sharesToCents } from "../rounding";
+import { layerAmounts } from "../../layers";
 
 const MEMBERS = [
   { id: "mem_a", name: "Priya" },
@@ -315,5 +316,53 @@ describe("category weights", () => {
       admin: 0.6,
       planning: 0.8,
     });
+  });
+});
+
+describe("layered pool", () => {
+  const contributions = [
+    item("c1", "mem_a", "code", 4, 3, 10),
+    item("c2", "mem_b", "code", 3, 3, 6),
+    item("c3", "mem_c", "client_comms", 5, 2, 3),
+  ];
+  const modes = ["equal", "merit", "hybrid", "hours"] as const;
+
+  it("matches the legacy split when no layers are given", () => {
+    const result = computeSplit({ totalAmountCents: 100_001, members: MEMBERS, contributions });
+    for (const person of result.people) {
+      expect(person.amountsByMode).toEqual(person.workAmountsByMode);
+      expect(person.finderAmountCents + person.leadAmountCents).toBe(0);
+    }
+    expect(result.layers.workPoolCents).toBe(100_001);
+  });
+
+  it("adds fees on top of work-pool slices and sums exactly to the total", () => {
+    const layers = layerAmounts(100_001, {
+      finderBps: 1500,
+      finderMemberId: "mem_b",
+      leadBps: 700,
+      leadMemberId: "mem_b", // finder and lead can be the same person
+    });
+    const result = computeSplit({ totalAmountCents: 100_001, members: MEMBERS, contributions, layers });
+    for (const mode of modes) {
+      const total = result.people.reduce((sum, p) => sum + p.amountsByMode[mode], 0);
+      const work = result.people.reduce((sum, p) => sum + p.workAmountsByMode[mode], 0);
+      expect(total).toBe(100_001);
+      expect(work).toBe(layers.workPoolCents);
+    }
+    const leo = result.people.find((p) => p.memberId === "mem_b")!;
+    expect(leo.finderAmountCents).toBe(15_000);
+    expect(leo.leadAmountCents).toBe(7_000);
+    expect(leo.amountsByMode.merit - leo.workAmountsByMode.merit).toBe(22_000);
+  });
+
+  it("keeps a fee in the work pool when nobody is assigned to receive it", () => {
+    const layers = layerAmounts(100_000, {
+      finderBps: 1000,
+      finderMemberId: null,
+      leadBps: 500,
+      leadMemberId: "mem_a",
+    });
+    expect(layers).toMatchObject({ finderCents: 0, leadCents: 5_000, workPoolCents: 95_000 });
   });
 });

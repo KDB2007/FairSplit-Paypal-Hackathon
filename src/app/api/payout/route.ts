@@ -1,20 +1,15 @@
 import { NextResponse } from "next/server";
 import {
-  amountFor,
   buildPayouts,
   getProject,
   newId,
+  payoutLines,
   saveProject,
+  type PayoutLine,
 } from "@/lib/store";
 import type { Payout } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
-
-interface PayoutItem {
-  person: string;
-  email: string;
-  amount: number;
-}
 
 async function paypalAccessToken(): Promise<string | null> {
   const clientId = process.env.PAYPAL_CLIENT_ID;
@@ -36,7 +31,7 @@ async function paypalAccessToken(): Promise<string | null> {
   return json.access_token ?? null;
 }
 
-async function callPaypalPayouts(items: PayoutItem[]): Promise<{
+async function callPaypalPayouts(items: PayoutLine[]): Promise<{
   batchId: string;
   txns: Array<{ person: string; txnId: string; status: string }>;
 } | null> {
@@ -54,7 +49,7 @@ async function callPaypalPayouts(items: PayoutItem[]): Promise<{
     },
     items: items.map((item, index) => ({
       recipient_type: "EMAIL",
-      amount: { value: item.amount.toFixed(2), currency: "USD" },
+      amount: { value: (item.amountCents / 100).toFixed(2), currency: "USD" },
       receiver: item.email,
       note: `FairSplit payout for ${item.person}`,
       sender_item_id: `item_${index + 1}`,
@@ -122,19 +117,23 @@ export async function POST(request: Request) {
     const totalPct = payable.reduce((s, d) => s + d.finalPct, 0);
     if (Math.abs(totalPct - 100) > 0.5) {
       return NextResponse.json(
-        { error: "Decision percentages must total 100 before payout." },
+        { error: "Work-pool shares must total 100% before payout." },
         { status: 400 }
       );
     }
 
-    const items: PayoutItem[] = payable.map((d) => {
-      const member = project.members.find((m) => m.name === d.person);
-      return {
-        person: d.person,
-        email: member?.email ?? "",
-        amount: amountFor(d.finalPct, project.totalAmount),
-      };
-    });
+    // Fees + work-pool slices in integer cents (disputed work slices withheld).
+    const items = payoutLines(project);
+    const paidCents = items.reduce((sum, item) => sum + item.amountCents, 0);
+    const totalCents = Math.round(project.totalAmount * 100);
+    const anyDisputed = payable.length < project.decisions.length;
+    if (anyDisputed ? paidCents > totalCents : paidCents !== totalCents) {
+      console.error("Payout lines do not reconcile", { paidCents, totalCents });
+      return NextResponse.json(
+        { error: "Payout amounts do not add up to the project total." },
+        { status: 500 }
+      );
+    }
 
     const demoMode =
       process.env.DEMO_MODE === "true" ||
@@ -151,18 +150,19 @@ export async function POST(request: Request) {
           id: newId("pay"),
           projectId: project.id,
           person: t.person,
-          amount: items[i].amount,
+          amount: items[i].amountCents / 100,
           paypalBatchId: result.batchId,
           paypalTxnId: t.txnId,
           status: "pending" as const,
           receiptUrl: `/receipt/${project.id}`,
+          breakdown: items[i].breakdown,
         }));
       } else {
         simulated = true;
-        payouts = buildPayouts(project, `SIM-${newId("batch")}`, true);
+        payouts = buildPayouts(project, `SIM-${newId("batch")}`, true, items);
       }
     } else {
-      payouts = buildPayouts(project, `DEMO-${newId("batch")}`, true);
+      payouts = buildPayouts(project, `DEMO-${newId("batch")}`, true, items);
     }
 
     project.payouts = payouts;

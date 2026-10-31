@@ -6,6 +6,11 @@ import {
   listProjects,
   summarise,
 } from "@/lib/store";
+import {
+  GITHUB_LOGIN_PATTERN,
+  TRELLO_USERNAME_PATTERN,
+  duplicateHandleErrors,
+} from "@/lib/integrations/identity";
 
 export const dynamic = "force-dynamic";
 
@@ -41,18 +46,46 @@ export async function POST(request: Request) {
 
     const cleaned = members
       .filter((m: { name?: string }) => m?.name?.trim())
-      .map((m: { name: string; email?: string; role?: "lead" | "member"; confirmed?: boolean }) => ({
-        name: String(m.name).trim(),
-        email: String(m.email ?? "").trim(),
-        role: m.role === "lead" ? ("lead" as const) : ("member" as const),
-        confirmed: Boolean(m.confirmed),
-      }));
+      .map(
+        (m: {
+          name: string;
+          email?: string;
+          role?: "lead" | "member";
+          confirmed?: boolean;
+          githubLogin?: string;
+          trelloUsername?: string;
+        }) => ({
+          name: String(m.name).trim(),
+          email: String(m.email ?? "").trim(),
+          role: m.role === "lead" ? ("lead" as const) : ("member" as const),
+          confirmed: Boolean(m.confirmed),
+          githubLogin: m.githubLogin?.trim() || undefined,
+          trelloUsername: m.trelloUsername?.trim() || undefined,
+        })
+      );
 
     if (cleaned.length < 1) {
       return NextResponse.json(
         { error: "At least one member with a name is required." },
         { status: 400 }
       );
+    }
+
+    // Each handle is optional and independent — a member may give neither,
+    // either, or both. What they do give must be a plausible handle, and no
+    // two members may claim the same one.
+    const formatErrors: string[] = [];
+    for (const m of cleaned) {
+      if (m.githubLogin && !GITHUB_LOGIN_PATTERN.test(m.githubLogin)) {
+        formatErrors.push(`${m.name}: "${m.githubLogin}" isn't a valid GitHub username.`);
+      }
+      if (m.trelloUsername && !TRELLO_USERNAME_PATTERN.test(m.trelloUsername)) {
+        formatErrors.push(`${m.name}: "${m.trelloUsername}" isn't a valid Trello username.`);
+      }
+    }
+    const errors = [...formatErrors, ...duplicateHandleErrors(cleaned)];
+    if (errors.length > 0) {
+      return NextResponse.json({ error: errors.join(" ") }, { status: 400 });
     }
 
     const project = createProject({

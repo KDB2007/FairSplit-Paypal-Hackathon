@@ -26,12 +26,15 @@ interface MemberRow {
   email: string;
   role: "lead" | "member";
   confirmed: boolean;
+  /** Self-reported; neither is required, and they're independent of each other. */
+  githubLogin: string;
+  trelloUsername: string;
 }
 
 const DEMO_TEAM: MemberRow[] = [
-  { name: "Priya", email: "priya@example.com", role: "lead", confirmed: true },
-  { name: "Leo", email: "leo@example.com", role: "member", confirmed: true },
-  { name: "Maya", email: "maya@example.com", role: "member", confirmed: true },
+  { name: "Priya", email: "priya@example.com", role: "lead", confirmed: true, githubLogin: "", trelloUsername: "" },
+  { name: "Leo", email: "leo@example.com", role: "member", confirmed: true, githubLogin: "", trelloUsername: "" },
+  { name: "Maya", email: "maya@example.com", role: "member", confirmed: true, githubLogin: "", trelloUsername: "" },
 ];
 
 const STATUS_TONE: Record<string, "slate" | "blue" | "emerald" | "amber" | "violet"> = {
@@ -77,7 +80,7 @@ export default function HomePage() {
   function addMember() {
     setMembers((prev) => [
       ...prev,
-      { name: "", email: "", role: "member", confirmed: true },
+      { name: "", email: "", role: "member", confirmed: true, githubLogin: "", trelloUsername: "" },
     ]);
   }
 
@@ -109,6 +112,8 @@ export default function HomePage() {
           email: m.email.trim(),
           role: i === 0 ? "lead" : m.role,
           confirmed: m.confirmed,
+          githubLogin: m.githubLogin.trim() || undefined,
+          trelloUsername: m.trelloUsername.trim() || undefined,
         })),
       });
       router.push(`/project/${project.id}`);
@@ -244,6 +249,11 @@ export default function HomePage() {
                       </Button>
                     </div>
                   </div>
+                  <p className="mb-2 text-xs text-slate-500">
+                    GitHub/Trello usernames are optional and independent — add either, both, or
+                    neither. They let synced activity attribute automatically instead of needing
+                    to be mapped by hand later.
+                  </p>
                   <div className="space-y-2">
                     {members.map((member, index) => (
                       <div
@@ -300,6 +310,18 @@ export default function HomePage() {
                             </button>
                           )}
                         </div>
+                        <Input
+                          className="sm:col-span-6"
+                          placeholder="GitHub username (optional)"
+                          value={member.githubLogin}
+                          onChange={(e) => updateMember(index, { githubLogin: e.target.value })}
+                        />
+                        <Input
+                          className="sm:col-span-6"
+                          placeholder="Trello username (optional)"
+                          value={member.trelloUsername}
+                          onChange={(e) => updateMember(index, { trelloUsername: e.target.value })}
+                        />
                       </div>
                     ))}
                   </div>

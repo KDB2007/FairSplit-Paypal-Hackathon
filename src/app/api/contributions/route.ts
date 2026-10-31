@@ -4,7 +4,7 @@ import { getProject, newId, saveProject } from "@/lib/store";
 
 export const dynamic = "force-dynamic";
 
-const VALID_TYPES: ContribType[] = ["commit", "pr", "trello", "manual"];
+const VALID_TYPES: ContribType[] = ["commit", "pr", "review", "trello", "manual"];
 
 /** POST /api/contributions — manually log work. */
 export async function POST(request: Request) {
@@ -23,7 +23,7 @@ export async function POST(request: Request) {
     }
     if (!VALID_TYPES.includes(type)) {
       return NextResponse.json(
-        { error: "type must be commit, pr, trello or manual." },
+        { error: "type must be commit, pr, review, trello or manual." },
         { status: 400 }
       );
     }

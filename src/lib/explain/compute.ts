@@ -1,6 +1,7 @@
 import type {
   AmountsByMode,
   ContributionCategory,
+  LayerAmounts,
   ScoreMode,
   ScoredPerson,
 } from "../types";
@@ -78,6 +79,8 @@ export interface ComputeOptions {
   contributions: ComputeContribution[];
   categoryWeights?: Partial<Record<ContributionCategory, number>>;
   hybridWeights?: { merit: number; hours: number };
+  /** Charter fees; omitted ⇒ the whole total is the work pool. */
+  layers?: LayerAmounts;
 }
 
 export interface ComputedPerson extends Omit<ScoredPerson, "reason" | "evidenceIds"> {
@@ -93,6 +96,7 @@ export interface ComputeResult {
   categoryWeights: Record<ContributionCategory, number>;
   hybridWeights: { merit: number; hours: number };
   values: Record<string, number>;
+  layers: LayerAmounts;
 }
 
 function resolveWeights(
@@ -115,6 +119,14 @@ export function computeSplit(options: ComputeOptions): ComputeResult {
   const memberCount = members.length;
 
   const allCents = Math.max(0, Math.round(totalAmountCents));
+  const layers: LayerAmounts = options.layers ?? {
+    finderCents: 0,
+    leadCents: 0,
+    workPoolCents: allCents,
+    finderMemberId: null,
+    leadMemberId: null,
+  };
+  const workPoolAmountCents = Math.max(0, Math.round(layers.workPoolCents));
   const values: Record<string, number> = {};
 
   const byMember = new Map<
@@ -172,7 +184,7 @@ export function computeSplit(options: ComputeOptions): ComputeResult {
   const totalHours = members.reduce((sum, m) => sum + (byMember.get(m.id)?.hours ?? 0), 0);
   const hoursFallback = totalHours <= 0;
 
-  // Raw shares (0..1). Every branch is total-safe: no divide-by-zero anywhere.
+  // Raw shares (0..1) for WORK POOL only. Every branch is total-safe: no divide-by-zero anywhere.
   const meritShares = members.map((member) => {
     if (memberCount === 0) return 0;
     if (totalScore > 0) return (scores.get(member.id) ?? 0) / totalScore;
@@ -202,6 +214,14 @@ export function computeSplit(options: ComputeOptions): ComputeResult {
     hours: hoursShares,
   };
 
+  // Work pool cents distributed by shares
+  const workPoolCentsByMode: Record<ScoreMode, number[]> = {
+    equal: sharesToCents(modeShares.equal, workPoolAmountCents),
+    merit: sharesToCents(modeShares.merit, workPoolAmountCents),
+    hybrid: sharesToCents(modeShares.hybrid, workPoolAmountCents),
+    hours: sharesToCents(modeShares.hours, workPoolAmountCents),
+  };
+
   const bps: Record<ScoreMode, number[]> = {
     equal: sharesToBasisPoints(modeShares.equal),
     merit: sharesToBasisPoints(modeShares.merit),
@@ -209,20 +229,23 @@ export function computeSplit(options: ComputeOptions): ComputeResult {
     hours: sharesToBasisPoints(modeShares.hours),
   };
 
-  const cents: Record<ScoreMode, number[]> = {
-    equal: sharesToCents(modeShares.equal, allCents),
-    merit: sharesToCents(modeShares.merit, allCents),
-    hybrid: sharesToCents(modeShares.hybrid, allCents),
-    hours: sharesToCents(modeShares.hours, allCents),
-  };
-
   const people: ComputedPerson[] = members.map((member, index) => {
     const bucket = byMember.get(member.id)!;
+    // Charter fees are fixed per person; only the work-pool slice varies by mode.
+    const finderAmountCents = member.id === layers.finderMemberId ? layers.finderCents : 0;
+    const leadAmountCents = member.id === layers.leadMemberId ? layers.leadCents : 0;
+    const fees = finderAmountCents + leadAmountCents;
+    const workAmountsByMode: AmountsByMode = {
+      equal: workPoolCentsByMode.equal[index],
+      merit: workPoolCentsByMode.merit[index],
+      hybrid: workPoolCentsByMode.hybrid[index],
+      hours: workPoolCentsByMode.hours[index],
+    };
     const amountsByMode: AmountsByMode = {
-      equal: cents.equal[index],
-      merit: cents.merit[index],
-      hybrid: cents.hybrid[index],
-      hours: cents.hours[index],
+      equal: fees + workAmountsByMode.equal,
+      merit: fees + workAmountsByMode.merit,
+      hybrid: fees + workAmountsByMode.hybrid,
+      hours: fees + workAmountsByMode.hours,
     };
     const valueByCategory: Partial<Record<ContributionCategory, number>> = {};
     for (const [category, value] of bucket.byCategory) {
@@ -240,6 +263,7 @@ export function computeSplit(options: ComputeOptions): ComputeResult {
       hoursPct: bps.hours[index] / 100,
       equalPct: bps.equal[index] / 100,
       amountsByMode,
+      workAmountsByMode,
       hiddenContributor:
         bucket.items > 0 &&
         meritPct - activityCountSharePct >= HIDDEN_MARGIN_PTS &&
@@ -250,6 +274,8 @@ export function computeSplit(options: ComputeOptions): ComputeResult {
       valueByCategory,
       score: scores.get(member.id) ?? 0,
       meritRawPct: meritShares[index] * 100,
+      finderAmountCents,
+      leadAmountCents,
     };
   });
 
@@ -261,6 +287,7 @@ export function computeSplit(options: ComputeOptions): ComputeResult {
     categoryWeights,
     hybridWeights,
     values,
+    layers: { ...layers, workPoolCents: workPoolAmountCents },
   };
 }
 
