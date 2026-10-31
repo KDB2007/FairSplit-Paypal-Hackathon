@@ -10,8 +10,10 @@
   },
   "dependencies": {
     "next": "16.4.3",
+    "openai": "^7.46.0",
     "react": "19.3.0",
-    "react-dom": "19.3.0"
+    "react-dom": "19.3.0",
+    "recharts": "^3.10.1"
   },
   "devDependencies": {
     "@tailwindcss/turbopack": "^4",
