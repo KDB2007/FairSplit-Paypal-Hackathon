@@ -76,16 +76,18 @@ export function AppSidebar() {
             <SidebarGroupLabel className="truncate">{active?.name ?? "This project"}</SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu>
-                <SidebarMenuItem>
-                  <SidebarMenuButton
-                    isActive={pathname.startsWith("/project/")}
-                    render={<Link href={`/project/${activeId}`} />}
-                    tooltip="Workflow"
-                  >
-                    <ListChecks />
-                    <span>Workflow</span>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
+                {active?.status !== "paid" && (
+                  <SidebarMenuItem>
+                    <SidebarMenuButton
+                      isActive={pathname.startsWith("/project/")}
+                      render={<Link href={`/project/${activeId}`} />}
+                      tooltip="Workflow"
+                    >
+                      <ListChecks />
+                      <span>Workflow</span>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                )}
                 <SidebarMenuItem>
                   <SidebarMenuButton
                     isActive={pathname.startsWith("/dashboard/")}

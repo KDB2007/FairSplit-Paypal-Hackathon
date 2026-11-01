@@ -118,11 +118,13 @@ export default function DashboardPage() {
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Badge tone={STATUS_TONE[project.status] ?? "slate"}>{project.status.replace("_", " ")}</Badge>
-          <Link href={`/project/${project.id}`}>
-            <Button variant="outline" size="sm">
-              <ArrowLeft className="size-3.5" /> Workflow
-            </Button>
-          </Link>
+          {project.status !== "paid" && (
+            <Link href={`/project/${project.id}`}>
+              <Button variant="outline" size="sm">
+                <ArrowLeft className="size-3.5" /> Workflow
+              </Button>
+            </Link>
+          )}
           {project.payouts.length > 0 && (
             <Link href={`/receipt/${project.id}`}>
               <Button size="sm">

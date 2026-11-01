@@ -2,12 +2,13 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { LayoutDashboard, ReceiptText } from "lucide-react";
 import { toast } from "sonner";
 import type { Project, ScoreMode, ScoredSplit } from "@/lib/types";
 import { fetchProject, logContribution, saveSplit, sendPayout, syncActivity } from "@/lib/client";
+import { projectHref } from "@/lib/project-links";
 import { money } from "@/lib/utils";
 import { CharterPanel } from "@/components/charter-panel";
 import { ExplainableSplit } from "@/components/explain/explainable-split";
@@ -44,6 +45,7 @@ function rowsFrom(project: Project): DecisionRow[] {
 export default function ProjectPage() {
   const params = useParams();
   const projectId = String(params?.id ?? "");
+  const router = useRouter();
   const reduce = useReducedMotion();
   const { track } = useTasks();
 
@@ -61,6 +63,10 @@ export default function ProjectPage() {
     fetchProject(projectId)
       .then((data) => {
         if (!active) return;
+        // A paid project has nothing left to do here: its receipt is the record.
+        // The payout screen's own "done" state is still reachable right after
+        // paying, because this only runs when the page first loads.
+        if (data.status === "paid") router.replace(projectHref(data));
         setProject(data);
         if (data.status === "paid" || data.status === "approved") setStep(3);
         else if (data.scoredSplit) setStep(1);
@@ -71,7 +77,7 @@ export default function ProjectPage() {
     return () => {
       active = false;
     };
-  }, [projectId]);
+  }, [projectId, router]);
 
   // Keep the editable review rows in step with the saved decisions
   // (adjusted during render rather than in an effect, so there's no extra pass).

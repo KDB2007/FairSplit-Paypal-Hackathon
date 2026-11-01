@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
 import { FolderKanban, LayoutDashboard, ListChecks, Moon, Plus, ReceiptText, Sparkles, Sun } from "lucide-react";
 import ActionSearchBar, { type CommandItem } from "@/components/kokonutui/action-search-bar";
+import { projectHref } from "@/lib/project-links";
 import { currentProjectId, useProjects } from "./use-projects";
 
 /** ⌘K palette: jump to any project or page, and switch theme. */
@@ -18,17 +19,29 @@ export function CommandBar({ className }: { className?: string }) {
   const items = useMemo<CommandItem[]>(() => {
     const list: CommandItem[] = [];
     if (activeId) {
-      const name = projects?.find((p) => p.id === activeId)?.name ?? "This project";
+      const active = projects?.find((p) => p.id === activeId);
+      const name = active?.name ?? "This project";
+      // A paid project opens on its receipt, so a separate workflow entry would
+      // be a second link to the same place.
+      if (active?.status !== "paid") {
+        list.push({
+          id: "cur-workflow",
+          label: `${name}: workflow`,
+          group: "This project",
+          icon: <ListChecks />,
+          href: `/project/${activeId}`,
+        });
+      }
       list.push(
-        { id: "cur-workflow", label: `${name}: workflow`, group: "This project", icon: <ListChecks />, href: `/project/${activeId}` },
         { id: "cur-dashboard", label: `${name}: overview`, group: "This project", icon: <LayoutDashboard />, href: `/dashboard/${activeId}` },
         { id: "cur-receipt", label: `${name}: receipt`, group: "This project", icon: <ReceiptText />, href: `/receipt/${activeId}` }
       );
     }
+    const demo = projects?.find((p) => p.id === "demo");
     list.push(
       { id: "projects", label: "Dashboard", group: "Go to", icon: <LayoutDashboard />, href: "/projects" },
       { id: "new", label: "New project", group: "Go to", icon: <Plus />, href: "/projects/new", keywords: ["create", "charter"] },
-      { id: "demo", label: "Demo project", group: "Go to", icon: <Sparkles />, href: "/project/demo" }
+      { id: "demo", label: "Demo project", group: "Go to", icon: <Sparkles />, href: demo ? projectHref(demo) : "/project/demo" }
     );
     if (projects && projects.length > 0) {
       list.push({
@@ -41,7 +54,7 @@ export function CommandBar({ className }: { className?: string }) {
           id: `p-${p.id}`,
           label: p.name,
           keywords: [p.status.replace("_", " ")],
-          href: `/project/${p.id}`,
+          href: projectHref(p),
         })),
       });
     }

@@ -59,9 +59,9 @@ export default function ReceiptPage() {
   return (
     <PageShell className="max-w-5xl">
       <div className="no-print mb-6 flex flex-wrap items-center justify-between gap-3">
-        <Link href={`/project/${project.id}`}>
+        <Link href={paid ? `/dashboard/${project.id}` : `/project/${project.id}`}>
           <Button variant="ghost" size="sm">
-            <ArrowLeft className="size-3.5" /> Back to project
+            <ArrowLeft className="size-3.5" /> {paid ? "Back to overview" : "Back to project"}
           </Button>
         </Link>
         <Button onClick={() => window.print()} disabled={!paid}>

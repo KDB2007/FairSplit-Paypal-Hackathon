@@ -14,6 +14,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { StatusIsland } from "@/components/kokonutui/status-island";
+import { projectHref } from "@/lib/project-links";
 import { CommandBar } from "./command-bar";
 import { useTasks } from "./tasks";
 import { currentProjectId, useProjects } from "./use-projects";
@@ -32,11 +33,15 @@ export function AppHeader() {
   const { tasks, dismiss } = useTasks();
   const activeId = currentProjectId(pathname);
   const section = pathname.split("/")[1];
-  const projectName = projects?.find((p) => p.id === activeId)?.name;
+  const project = projects?.find((p) => p.id === activeId);
+  const projectName = project?.name;
 
   const crumbs: Array<{ label: string; href?: string }> = [{ label: "Dashboard", href: "/projects" }];
   if (activeId) {
-    crumbs.push({ label: projectName ?? "Project", href: `/project/${activeId}` });
+    crumbs.push({
+      label: projectName ?? "Project",
+      href: project ? projectHref(project) : `/project/${activeId}`,
+    });
     crumbs.push({ label: SECTION_LABEL[section] ?? section });
   }
 

@@ -6,6 +6,7 @@ import { ArrowRight, MoreHorizontal } from "lucide-react";
 import { motion, useReducedMotion } from "motion/react";
 import type { ProjectStatus, ProjectSummary } from "@/lib/types";
 import { deleteProject } from "@/lib/client";
+import { projectHref } from "@/lib/project-links";
 import { cn, formatDate, money } from "@/lib/utils";
 import { personColor } from "@/lib/person-color";
 import { Avatar } from "@/components/ui";
@@ -166,7 +167,7 @@ function ProjectRow({
       className="group relative"
     >
       <Link
-        href={`/project/${project.id}`}
+        href={projectHref(project)}
         aria-label={`Open ${project.name}`}
         className="absolute inset-0 z-0 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       />
