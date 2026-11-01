@@ -12,6 +12,11 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Vendored registry code (shadcn/ui, Kokonut UI), added via `npx shadcn add`.
+    // It is owned upstream; lint the app code that uses it, not its internals.
+    "src/components/ui/**",
+    "src/components/kokonutui/**",
+    "src/hooks/use-mobile.ts",
   ]),
 ]);
 

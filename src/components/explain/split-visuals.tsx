@@ -1,8 +1,13 @@
 "use client";
 
 import { Cell, Pie, PieChart, ResponsiveContainer } from "recharts";
+import { motion, useReducedMotion } from "motion/react";
 import type { ScoreMode, ScoredPerson, ScoredSplit } from "@/lib/types";
 import { cn, money } from "@/lib/utils";
+import { personColor } from "@/lib/person-color";
+import { NumberTicker } from "@/components/motion/number-ticker";
+
+const EASE_OUT = [0.16, 1, 0.3, 1] as const;
 
 /* -------------------------------------------------------------------------- */
 /* Shared presentation helpers                                                */
@@ -24,25 +29,12 @@ export const MODE_HINT: Record<ScoreMode, string> = {
   hours: "Proportional to hours logged on the project.",
 };
 
-const PERSON_COLORS = [
-  "#2563eb",
-  "#10b981",
-  "#f59e0b",
-  "#8b5cf6",
-  "#0ea5e9",
-  "#ef4444",
-  "#ec4899",
-  "#14b8a6",
-];
-
-/** Colour is tied to a person, not to their rank, so it survives re-sorting. */
+/**
+ * Colour is tied to a person (their place in the member list), not to their
+ * rank, so it survives re-sorting and matches every other screen.
+ */
 export function peopleColorMap(people: ScoredPerson[]): Record<string, string> {
-  return Object.fromEntries(
-    people.map((person, index) => [
-      person.memberId,
-      PERSON_COLORS[index % PERSON_COLORS.length],
-    ])
-  );
+  return Object.fromEntries(people.map((person, index) => [person.memberId, personColor(index)]));
 }
 
 export function shareFor(person: ScoredPerson, mode: ScoreMode): number {
@@ -85,14 +77,14 @@ export function ConfidencePill({ split }: { split: ScoredSplit }) {
         className={cn(
           "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors",
           lower
-            ? "border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100"
-            : "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+            ? "border-warning/40 bg-warning/10 text-warning-foreground dark:text-warning hover:bg-warning/20"
+            : "border-success/25 bg-success/10 text-success hover:bg-success/20"
         )}
       >
         <span
           className={cn(
             "h-1.5 w-1.5 rounded-full",
-            lower ? "bg-amber-500" : "bg-emerald-500"
+            lower ? "bg-warning" : "bg-success"
           )}
           aria-hidden
         />
@@ -105,12 +97,12 @@ export function ConfidencePill({ split }: { split: ScoredSplit }) {
       <div
         id="confidence-tip"
         role="tooltip"
-        className="pointer-events-none invisible absolute right-0 top-full z-40 mt-2 w-72 translate-y-1 rounded-xl border border-slate-200 bg-white p-3 text-left opacity-0 shadow-xl transition-all duration-150 group-hover:visible group-hover:translate-y-0 group-hover:opacity-100 group-focus-within:visible group-focus-within:translate-y-0 group-focus-within:opacity-100"
+        className="pointer-events-none invisible absolute right-0 top-full z-40 mt-2 w-72 translate-y-1 rounded-xl border border-border bg-card p-3 text-left opacity-0 shadow-xl transition-all duration-150 group-hover:visible group-hover:translate-y-0 group-hover:opacity-100 group-focus-within:visible group-focus-within:translate-y-0 group-focus-within:opacity-100"
       >
-        <p className="text-xs font-semibold text-slate-900">
+        <p className="text-xs font-semibold text-foreground">
           {lower ? "Shares are softer this time" : "The model agreed with itself"}
         </p>
-        <p className="mt-1 text-xs leading-relaxed text-slate-600">
+        <p className="mt-1 text-xs leading-relaxed text-foreground/80">
           {lower
             ? `Across ${split.formula.runs} independent reads of every activity, merit shares moved more than 5 points. Ranges are shown on each card.`
             : `Across ${split.formula.runs} independent reads of every activity, merit shares stayed within ${delta.toFixed(
@@ -118,18 +110,18 @@ export function ConfidencePill({ split }: { split: ScoredSplit }) {
               )} points of each other (limit: 5).`}
         </p>
         {lower && ranged.length > 0 && (
-          <ul className="mt-2 space-y-1 border-t border-slate-100 pt-2">
+          <ul className="mt-2 space-y-1 border-t border-border pt-2">
             {ranged.map((person) => (
-              <li key={person.memberId} className="flex justify-between text-xs text-slate-600">
+              <li key={person.memberId} className="flex justify-between text-xs text-foreground/80">
                 <span>{person.person}</span>
-                <span className="font-medium text-slate-800">
+                <span className="font-medium text-foreground">
                   {person.range!.minMeritPct.toFixed(1)}–{person.range!.maxMeritPct.toFixed(1)}%
                 </span>
               </li>
             ))}
           </ul>
         )}
-        <p className="mt-2 border-t border-slate-100 pt-2 text-[10px] uppercase tracking-wide text-slate-400">
+        <p className="mt-2 border-t border-border pt-2 text-[10px] uppercase tracking-wide text-muted-foreground">
           {split.formula.source === "canned"
             ? "DEMO_MODE · canned judgments, real maths"
             : `Model · ${split.formula.runs} runs · temp 0.2`}
@@ -148,26 +140,33 @@ export function ShareBar({
   equalValue,
   color,
   showEqual = true,
+  delay = 0,
 }: {
   value: number;
   equalValue: number;
   color: string;
   showEqual?: boolean;
+  delay?: number;
 }) {
+  const reduce = useReducedMotion();
   const width = Math.min(100, Math.max(0, value));
   return (
     <div
-      className="relative h-2 w-full overflow-hidden rounded-full bg-slate-100"
+      className="relative h-2 w-full overflow-hidden rounded-full bg-muted"
       title={showEqual ? `Equal split would be ${equalValue.toFixed(2)}%` : undefined}
     >
-      <div
-        className="h-full rounded-full transition-all duration-500 ease-out"
-        style={{ width: `${width}%`, backgroundColor: color }}
+      <motion.div
+        className="h-full rounded-full"
+        style={{ backgroundColor: color }}
+        initial={reduce ? false : { width: 0 }}
+        animate={{ width: `${width}%` }}
+        transition={{ duration: reduce ? 0 : 0.6, delay, ease: EASE_OUT }}
       />
       {showEqual && (
-        <span
-          className="absolute top-0 h-full w-px bg-slate-400/70"
-          style={{ left: `${Math.min(100, Math.max(0, equalValue))}%` }}
+        <motion.span
+          className="absolute top-[-2px] h-[calc(100%+4px)] w-0.5 rounded-full bg-foreground/45"
+          animate={{ left: `${Math.min(100, Math.max(0, equalValue))}%` }}
+          transition={{ duration: reduce ? 0 : 0.4, ease: EASE_OUT }}
           aria-hidden
         />
       )}
@@ -195,7 +194,7 @@ export function SplitDonut({
   const data = people.map((person) => ({
     name: person.person,
     value: Math.max(0, shareFor(person, mode)),
-    color: colors[person.memberId] ?? PERSON_COLORS[0],
+    color: colors[person.memberId] ?? personColor(0),
   }));
 
   return (
@@ -264,13 +263,13 @@ export function SplitDonut({
         )}
 
         <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-          <span className="text-[10px] font-medium uppercase tracking-[0.14em] text-slate-400">
+          <span className="text-[10px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
             {MODE_LABEL[mode]} split
           </span>
-          <span className="mt-1 text-xl font-bold tracking-tight text-slate-900">
+          <span className="mt-1 text-xl font-bold tracking-tight text-foreground">
             {money(totalCents / 100)}
           </span>
-          <span className="mt-0.5 text-[10px] text-slate-400">{caption}</span>
+          <span className="mt-0.5 text-[10px] text-muted-foreground">{caption}</span>
         </div>
       </div>
 
@@ -282,14 +281,14 @@ export function SplitDonut({
               style={{ backgroundColor: entry.color }}
               aria-hidden
             />
-            <span className="min-w-0 flex-1 truncate text-slate-600">{entry.name}</span>
-            <span className="font-semibold tabular-nums text-slate-800">
+            <span className="min-w-0 flex-1 truncate text-foreground/80">{entry.name}</span>
+            <span className="font-semibold tabular-nums text-foreground">
               {entry.value.toFixed(2)}%
             </span>
           </li>
         ))}
       </ul>
-      <p className="mt-3 text-center text-[10px] leading-relaxed text-slate-400">
+      <p className="mt-3 text-center text-[10px] leading-relaxed text-muted-foreground">
         Dashed ticks mark where an equal split would divide the ring.
       </p>
     </div>
@@ -307,98 +306,148 @@ export interface WaterfallRow {
   workCents: number;
 }
 
+interface Segment {
+  key: string;
+  label: string;
+  cents: number;
+  color: string;
+}
+
 /**
- * Total → charter fees → work pool → people. Fees come off the top and are
- * fixed by the charter; the work pool is what the AI scored and humans edited.
+ * Total → finder fee → lead fee → work pool (→ each person). Fees come off the
+ * top and are fixed by the charter; the work pool is what the AI scored and
+ * humans edited. Segments resize smoothly and the amounts tick as values change.
+ *
+ * Pass `workPoolCents` to show the work pool as one block (before scoring, as in
+ * the charter); otherwise it's broken down per person in their colours.
  */
 export function PoolWaterfall({
   totalCents,
   rows,
+  colors = {},
+  workPoolCents,
+  showTable = true,
 }: {
   totalCents: number;
   rows: WaterfallRow[];
+  /** Person name → colour. */
+  colors?: Record<string, string>;
+  workPoolCents?: number;
+  showTable?: boolean;
 }) {
+  const reduce = useReducedMotion();
   const finder = rows.filter((row) => row.finderCents > 0);
   const lead = rows.filter((row) => row.leadCents > 0);
   const finderCents = finder.reduce((sum, row) => sum + row.finderCents, 0);
   const leadCents = lead.reduce((sum, row) => sum + row.leadCents, 0);
-  const workCents = rows.reduce((sum, row) => sum + row.workCents, 0);
-  const unpaidCents = Math.max(0, totalCents - finderCents - leadCents - workCents);
+  const workCents = workPoolCents ?? rows.reduce((sum, row) => sum + row.workCents, 0);
+  const heldCents = Math.max(0, totalCents - finderCents - leadCents - workCents);
   const pct = (cents: number) => (totalCents > 0 ? (cents / totalCents) * 100 : 0);
+  const names = (list: WaterfallRow[]) => (list.length ? ` · ${list.map((r) => r.person).join(", ")}` : "");
 
-  const segments = [
-    { key: "finder", label: `Finder fee${finder.length ? ` · ${finder.map((r) => r.person).join(", ")}` : ""}`, cents: finderCents, className: "bg-amber-400" },
-    { key: "lead", label: `Lead fee${lead.length ? ` · ${lead.map((r) => r.person).join(", ")}` : ""}`, cents: leadCents, className: "bg-violet-400" },
-    { key: "work", label: "Work pool", cents: workCents, className: "bg-blue-500" },
-    { key: "held", label: "Withheld (disputed)", cents: unpaidCents, className: "bg-slate-300" },
-  ].filter((segment) => segment.cents > 0);
+  const segments: Segment[] = [
+    { key: "finder", label: `Finder fee${names(finder)}`, cents: finderCents, color: "var(--highlight)" },
+    { key: "lead", label: `Lead fee${names(lead)}`, cents: leadCents, color: "var(--info)" },
+    ...(workPoolCents !== undefined
+      ? [{ key: "work", label: "Work pool", cents: workCents, color: "var(--primary)" }]
+      : rows
+          .filter((row) => row.workCents > 0)
+          .map((row, i) => ({
+            key: `work-${row.person}`,
+            label: row.person,
+            cents: row.workCents,
+            color: colors[row.person] ?? personColor(i),
+          }))),
+    { key: "held", label: "Withheld (disputed)", cents: heldCents, color: "var(--muted-foreground)" },
+  ];
+  const visible = segments.filter((segment) => segment.cents > 0);
 
   return (
     <div>
+      <div className="mb-2 flex items-baseline justify-between text-xs text-muted-foreground">
+        <span>Total</span>
+        <NumberTicker value={totalCents / 100} format={(v) => money(v)} className="font-semibold text-foreground" />
+      </div>
       <div
-        className="flex h-3 w-full overflow-hidden rounded-full bg-slate-100"
+        className="flex h-4 w-full gap-0.5 overflow-hidden rounded-full bg-muted"
         role="img"
-        aria-label={segments.map((s) => `${s.label} ${money(s.cents / 100)}`).join(", ")}
+        aria-label={visible.map((s) => `${s.label} ${money(s.cents / 100)}`).join(", ")}
       >
         {segments.map((segment) => (
-          <div
+          <motion.div
             key={segment.key}
-            className={cn("h-full", segment.className)}
-            style={{ width: `${pct(segment.cents)}%` }}
+            className="h-full first:rounded-l-full last:rounded-r-full"
+            style={{ backgroundColor: segment.color, opacity: segment.key === "held" ? 0.35 : 1 }}
+            initial={false}
+            animate={{ width: `${pct(segment.cents)}%` }}
+            transition={{ duration: reduce ? 0 : 0.45, ease: EASE_OUT }}
           />
         ))}
       </div>
-      <ul className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-600">
-        {segments.map((segment) => (
+      <ul className="mt-3 flex flex-wrap gap-x-5 gap-y-1.5 text-xs text-foreground/80">
+        {visible.map((segment) => (
           <li key={segment.key} className="flex items-center gap-1.5">
-            <span className={cn("h-2 w-2 rounded-full", segment.className)} aria-hidden />
+            <span className="size-2 rounded-full" style={{ backgroundColor: segment.color }} aria-hidden />
             {segment.label}
-            <span className="font-semibold tabular-nums text-slate-800">
-              {money(segment.cents / 100)}
-            </span>
+            <NumberTicker
+              value={segment.cents / 100}
+              format={(v) => money(v)}
+              className="font-semibold text-foreground"
+            />
           </li>
         ))}
       </ul>
 
-      <table className="mt-4 w-full text-sm">
-        <thead className="text-left text-xs uppercase tracking-wide text-slate-400">
-          <tr>
-            <th className="py-1.5 font-medium">Person</th>
-            <th className="py-1.5 text-right font-medium">Fees</th>
-            <th className="py-1.5 text-right font-medium">Work pool</th>
-            <th className="py-1.5 text-right font-medium">Total</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-slate-100">
-          {rows.map((row) => {
-            const fees = row.finderCents + row.leadCents;
-            return (
-              <tr key={row.person}>
-                <td className="py-1.5 text-slate-700">{row.person}</td>
-                <td className="py-1.5 text-right tabular-nums text-slate-500">
-                  {fees > 0 ? money(fees / 100) : "—"}
-                </td>
-                <td className="py-1.5 text-right tabular-nums text-slate-500">
-                  {money(row.workCents / 100)}
-                </td>
-                <td className="py-1.5 text-right font-semibold tabular-nums text-slate-900">
-                  {money((fees + row.workCents) / 100)}
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-        <tfoot>
-          <tr className="border-t border-slate-200">
-            <td className="py-1.5 font-medium text-slate-700" colSpan={3}>
-              Total
-            </td>
-            <td className="py-1.5 text-right font-bold tabular-nums text-slate-900">
-              {money((finderCents + leadCents + workCents) / 100)}
-            </td>
-          </tr>
-        </tfoot>
-      </table>
+      {showTable && (
+        <table className="mt-4 w-full text-sm">
+          <thead className="text-left text-xs uppercase tracking-wide text-muted-foreground">
+            <tr>
+              <th className="py-1.5 font-medium">Person</th>
+              <th className="py-1.5 text-right font-medium">Fees</th>
+              <th className="py-1.5 text-right font-medium">Work pool</th>
+              <th className="py-1.5 text-right font-medium">Total</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border">
+            {rows.map((row, i) => {
+              const fees = row.finderCents + row.leadCents;
+              return (
+                <tr key={row.person}>
+                  <td className="py-1.5 text-foreground/80">
+                    <span className="flex items-center gap-2">
+                      <span
+                        className="size-2 rounded-full"
+                        style={{ backgroundColor: colors[row.person] ?? personColor(i) }}
+                        aria-hidden
+                      />
+                      {row.person}
+                    </span>
+                  </td>
+                  <td className="py-1.5 text-right tabular-nums text-muted-foreground">
+                    {fees > 0 ? money(fees / 100) : "—"}
+                  </td>
+                  <td className="py-1.5 text-right text-muted-foreground">
+                    <NumberTicker value={row.workCents / 100} format={(v) => money(v)} />
+                  </td>
+                  <td className="py-1.5 text-right font-semibold text-foreground">
+                    <NumberTicker value={(fees + row.workCents) / 100} format={(v) => money(v)} />
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+          <tfoot>
+            <tr className="border-t border-border">
+              <td className="py-1.5 font-medium text-foreground/80" colSpan={3}>
+                Paid out
+              </td>
+              <td className="py-1.5 text-right font-bold text-foreground">
+                <NumberTicker value={(finderCents + leadCents + workCents) / 100} format={(v) => money(v)} />
+              </td>
+            </tr>
+          </tfoot>
+        </table>
+      )}
     </div>
   );
 }

@@ -1,27 +1,190 @@
 @import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
 
+@custom-variant dark (&:is(.dark *));
+
+/*
+ * FairSplit design tokens.
+ * Brand: violet primary (from the Sellix hero globe) with an amber highlight
+ * (from the Capabilities section). The app is light-first; `.dark` is the
+ * toggled theme. The marketing page is always dark and sets its own colours.
+ */
 :root {
-  --background: #f8fafc;
-  --foreground: #0f172a;
-  --font-sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
-    "Segoe UI", Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+  --background: oklch(0.985 0.003 286);
+  --foreground: oklch(0.21 0.02 286);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.21 0.02 286);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.21 0.02 286);
+  --primary: oklch(0.52 0.21 286);
+  --primary-foreground: oklch(0.99 0.005 286);
+  --secondary: oklch(0.96 0.008 286);
+  --secondary-foreground: oklch(0.26 0.03 286);
+  --muted: oklch(0.965 0.006 286);
+  --muted-foreground: oklch(0.52 0.02 286);
+  --accent: oklch(0.955 0.02 286);
+  --accent-foreground: oklch(0.32 0.12 286);
+  --destructive: oklch(0.58 0.22 22);
+  --success: oklch(0.6 0.15 158);
+  --success-foreground: oklch(0.99 0.01 158);
+  --warning: oklch(0.76 0.16 70);
+  --warning-foreground: oklch(0.28 0.06 60);
+  --info: oklch(0.6 0.15 240);
+  --info-foreground: oklch(0.99 0.01 240);
+  --highlight: oklch(0.8 0.15 75);
+  --border: oklch(0.915 0.008 286);
+  --input: oklch(0.9 0.01 286);
+  --ring: oklch(0.62 0.16 286);
+  --chart-1: oklch(0.55 0.21 286);
+  --chart-2: oklch(0.77 0.15 70);
+  --chart-3: oklch(0.62 0.15 158);
+  --chart-4: oklch(0.66 0.13 230);
+  --chart-5: oklch(0.65 0.2 15);
+  --radius: 0.75rem;
+  /* One colour per person (by member order), shared by every chart and card. */
+  --person-1: oklch(0.55 0.21 286);
+  --person-2: oklch(0.7 0.16 60);
+  --person-3: oklch(0.6 0.14 162);
+  --person-4: oklch(0.6 0.14 235);
+  --person-5: oklch(0.6 0.2 12);
+  --person-6: oklch(0.6 0.12 195);
+  --sidebar: oklch(0.98 0.004 286);
+  --sidebar-foreground: oklch(0.26 0.03 286);
+  --sidebar-primary: oklch(0.52 0.21 286);
+  --sidebar-primary-foreground: oklch(0.99 0.005 286);
+  --sidebar-accent: oklch(0.945 0.02 286);
+  --sidebar-accent-foreground: oklch(0.32 0.12 286);
+  --sidebar-border: oklch(0.915 0.008 286);
+  --sidebar-ring: oklch(0.62 0.16 286);
+}
+
+.dark {
+  --background: oklch(0.16 0.012 286);
+  --foreground: oklch(0.96 0.005 286);
+  --card: oklch(0.205 0.014 286);
+  --card-foreground: oklch(0.96 0.005 286);
+  --popover: oklch(0.205 0.014 286);
+  --popover-foreground: oklch(0.96 0.005 286);
+  --primary: oklch(0.68 0.18 286);
+  --primary-foreground: oklch(0.16 0.02 286);
+  --secondary: oklch(0.26 0.016 286);
+  --secondary-foreground: oklch(0.96 0.005 286);
+  --muted: oklch(0.25 0.014 286);
+  --muted-foreground: oklch(0.7 0.015 286);
+  --accent: oklch(0.28 0.04 286);
+  --accent-foreground: oklch(0.9 0.05 286);
+  --destructive: oklch(0.68 0.19 22);
+  --success: oklch(0.7 0.14 158);
+  --success-foreground: oklch(0.16 0.03 158);
+  --warning: oklch(0.8 0.15 75);
+  --warning-foreground: oklch(0.2 0.04 60);
+  --info: oklch(0.7 0.13 240);
+  --info-foreground: oklch(0.16 0.03 240);
+  --highlight: oklch(0.82 0.15 75);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.6 0.16 286);
+  --chart-1: oklch(0.68 0.18 286);
+  --chart-2: oklch(0.8 0.15 75);
+  --chart-3: oklch(0.7 0.14 158);
+  --chart-4: oklch(0.72 0.12 230);
+  --chart-5: oklch(0.7 0.18 15);
+  --person-1: oklch(0.7 0.17 286);
+  --person-2: oklch(0.8 0.14 65);
+  --person-3: oklch(0.74 0.13 162);
+  --person-4: oklch(0.72 0.12 235);
+  --person-5: oklch(0.72 0.16 12);
+  --person-6: oklch(0.75 0.1 195);
+  --sidebar: oklch(0.18 0.013 286);
+  --sidebar-foreground: oklch(0.92 0.006 286);
+  --sidebar-primary: oklch(0.68 0.18 286);
+  --sidebar-primary-foreground: oklch(0.16 0.02 286);
+  --sidebar-accent: oklch(0.26 0.03 286);
+  --sidebar-accent-foreground: oklch(0.94 0.02 286);
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-ring: oklch(0.6 0.16 286);
 }
 
 @theme inline {
+  --font-sans: var(--font-geist), ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    Helvetica, Arial, sans-serif;
+  --font-heading: var(--font-sans);
+  --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-info: var(--info);
+  --color-info-foreground: var(--info-foreground);
+  --color-highlight: var(--highlight);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
 }
 
-html,
-body {
-  height: 100%;
+/*
+ * Person colours are used from JS (inline styles, chart configs), never from a
+ * class, so Tailwind would tree-shake them away. `static` forces them out.
+ */
+@theme static {
+  --color-person-1: var(--color-person-1);
+  --color-person-2: var(--person-2);
+  --color-person-3: var(--person-3);
+  --color-person-4: var(--person-4);
+  --color-person-5: var(--person-5);
+  --color-person-6: var(--person-6);
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: var(--font-sans);
-  -webkit-font-smoothing: antialiased;
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html {
+    @apply font-sans;
+  }
+  body {
+    @apply min-h-full bg-background text-foreground antialiased;
+  }
+  /* Tabular figures everywhere money and percentages line up. */
+  .tabular-nums {
+    font-variant-numeric: tabular-nums;
+  }
 }
 
 @media print {
@@ -30,5 +193,6 @@ body {
   }
   body {
     background: #ffffff;
+    color: #000000;
   }
 }

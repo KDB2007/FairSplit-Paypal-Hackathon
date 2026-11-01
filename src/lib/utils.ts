@@ -1,5 +1,9 @@
-export function cn(...values: Array<string | false | null | undefined>): string {
-  return values.filter(Boolean).join(" ");
+import { type ClassValue, clsx } from "clsx";
+import { twMerge } from "tailwind-merge";
+
+/** Merges class names and resolves conflicting Tailwind utilities (last one wins). */
+export function cn(...inputs: ClassValue[]): string {
+  return twMerge(clsx(inputs));
 }
 
 export function money(value: number): string {
@@ -41,12 +45,13 @@ export function initials(name: string): string {
     .toUpperCase();
 }
 
+// Theme-aware: chart tokens tint the background, so avatars read in light and dark.
 const AVATAR_COLORS = [
-  "bg-blue-100 text-blue-700",
-  "bg-emerald-100 text-emerald-700",
-  "bg-amber-100 text-amber-700",
-  "bg-violet-100 text-violet-700",
-  "bg-rose-100 text-rose-700",
+  "bg-chart-1/15 text-chart-1",
+  "bg-chart-3/15 text-chart-3",
+  "bg-chart-2/20 text-warning-foreground dark:text-chart-2",
+  "bg-chart-4/15 text-chart-4",
+  "bg-chart-5/15 text-chart-5",
 ];
 
 export function avatarClass(name: string): string {

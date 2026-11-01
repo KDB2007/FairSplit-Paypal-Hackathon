@@ -35,20 +35,20 @@ export function HowCalculated({ split }: { split: ScoredSplit }) {
   >;
 
   return (
-    <section className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+    <section className="overflow-hidden rounded-xl border border-border bg-card">
       <button
         type="button"
         onClick={() => setOpen((value) => !value)}
         aria-expanded={open}
-        className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition-colors hover:bg-slate-50"
+        className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition-colors hover:bg-muted/60"
       >
-        <span className="flex items-center gap-2 text-sm font-semibold text-slate-800">
-          <span className="text-slate-400" aria-hidden>
+        <span className="flex items-center gap-2 text-sm font-semibold text-foreground">
+          <span className="text-muted-foreground" aria-hidden>
             ƒ
           </span>
           How this was calculated
         </span>
-        <span className="flex items-center gap-3 text-xs text-slate-400">
+        <span className="flex items-center gap-3 text-xs text-muted-foreground">
           <span className="hidden sm:inline">
             {split.contributions.length} items judged · {split.formula.runs} runs
           </span>
@@ -68,17 +68,17 @@ export function HowCalculated({ split }: { split: ScoredSplit }) {
         )}
       >
         <div className="overflow-hidden">
-          <div className="border-t border-slate-100 px-4 py-4">
+          <div className="border-t border-border px-4 py-4">
             <ol className="space-y-3">
               {STEPS.map((step, index) => (
                 <li key={step.title} className="flex gap-3">
-                  <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-slate-900 text-[10px] font-semibold text-white">
+                  <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-foreground text-[10px] font-semibold text-background">
                     {index + 1}
                   </span>
                   <div className="min-w-0">
-                    <p className="text-sm font-medium text-slate-800">{step.title}</p>
-                    <p className="mt-0.5 text-xs leading-relaxed text-slate-500">{step.body}</p>
-                    <code className="mt-1 inline-block rounded bg-slate-50 px-1.5 py-0.5 text-[11px] text-slate-600">
+                    <p className="text-sm font-medium text-foreground">{step.title}</p>
+                    <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">{step.body}</p>
+                    <code className="mt-1 inline-block rounded bg-muted/50 px-1.5 py-0.5 text-[11px] text-foreground/80">
                       {step.code}
                     </code>
                   </div>
@@ -86,18 +86,18 @@ export function HowCalculated({ split }: { split: ScoredSplit }) {
               ))}
             </ol>
 
-            <div className="mt-4 border-t border-slate-100 pt-3">
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+            <div className="mt-4 border-t border-border pt-3">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                 Category weights
               </p>
               <div className="mt-1.5 flex flex-wrap gap-1.5">
                 {weights.map(([category, weight]) => (
                   <span
                     key={category}
-                    className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] text-slate-600"
+                    className="inline-flex items-center gap-1 rounded-full border border-border bg-muted/50 px-2 py-0.5 text-[11px] text-foreground/80"
                   >
                     {CATEGORY_LABEL[category]}
-                    <span className="font-semibold tabular-nums text-slate-800">
+                    <span className="font-semibold tabular-nums text-foreground">
                       {weight.toFixed(1)}×
                     </span>
                   </span>
@@ -105,14 +105,14 @@ export function HowCalculated({ split }: { split: ScoredSplit }) {
               </div>
             </div>
 
-            <div className="mt-4 grid gap-2 border-t border-slate-100 pt-3 text-[11px] text-slate-500 sm:grid-cols-2">
+            <div className="mt-4 grid gap-2 border-t border-border pt-3 text-[11px] text-muted-foreground sm:grid-cols-2">
               <p>
-                <span className="font-semibold text-slate-700">Run variance:</span> widest merit
+                <span className="font-semibold text-foreground/80">Run variance:</span> widest merit
                 swing {split.formula.maxMeritDeltaPct.toFixed(2)} pts across{" "}
                 {split.formula.runs} independent reads (limit 5).
               </p>
               <p>
-                <span className="font-semibold text-slate-700">Judgments:</span>{" "}
+                <span className="font-semibold text-foreground/80">Judgments:</span>{" "}
                 {split.formula.source === "canned"
                   ? "DEMO_MODE fixtures, replayed through the real formula"
                   : split.formula.source === "llm"
@@ -123,10 +123,10 @@ export function HowCalculated({ split }: { split: ScoredSplit }) {
             </div>
 
             {split.formula.notes.length > 0 && (
-              <ul className="mt-3 space-y-1 border-t border-slate-100 pt-3">
+              <ul className="mt-3 space-y-1 border-t border-border pt-3">
                 {split.formula.notes.map((note) => (
-                  <li key={note} className="flex gap-2 text-[11px] leading-relaxed text-slate-500">
-                    <span className="text-slate-300" aria-hidden>
+                  <li key={note} className="flex gap-2 text-[11px] leading-relaxed text-muted-foreground">
+                    <span className="text-muted-foreground/60" aria-hidden>
                       ·
                     </span>
                     {note}

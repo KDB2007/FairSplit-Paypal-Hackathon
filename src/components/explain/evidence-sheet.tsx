@@ -7,6 +7,8 @@ import type {
   ScoredPerson,
 } from "@/lib/types";
 import { cn, formatDate, money } from "@/lib/utils";
+import { ContributorRadar } from "./contributor-radar";
+import { cleanReason } from "./clean-reason";
 import { Avatar, Badge, Button } from "@/components/ui";
 
 /* -------------------------------------------------------------------------- */
@@ -52,19 +54,19 @@ export function CategoryBadge({ category }: { category: ContributionCategory }) 
 function ScoreDots({ label, value }: { label: string; value: number }) {
   return (
     <div className="flex items-center gap-1.5">
-      <span className="text-[10px] uppercase tracking-wide text-slate-400">{label}</span>
+      <span className="text-[10px] uppercase tracking-wide text-muted-foreground">{label}</span>
       <span className="flex items-center gap-0.5" aria-label={`${label} ${value} out of 5`}>
         {[1, 2, 3, 4, 5].map((step) => (
           <span
             key={step}
             className={cn(
               "h-1.5 w-1.5 rounded-full",
-              step <= value ? "bg-slate-700" : "bg-slate-200"
+              step <= value ? "bg-foreground/80" : "bg-muted"
             )}
           />
         ))}
       </span>
-      <span className="text-[10px] font-medium tabular-nums text-slate-500">{value}/5</span>
+      <span className="text-[10px] font-medium tabular-nums text-muted-foreground">{value}/5</span>
     </div>
   );
 }
@@ -99,7 +101,7 @@ export function EvidenceChips({
     <div className="space-y-1.5">
       {groups.map((group) => (
         <div key={group.category} className="flex flex-wrap items-center gap-1.5">
-          <span className="w-[74px] shrink-0 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+          <span className="w-[74px] shrink-0 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
             {CATEGORY_LABEL[group.category]}
           </span>
           {group.items.map((item) => (
@@ -108,10 +110,10 @@ export function EvidenceChips({
               type="button"
               onClick={() => onOpen(item.id)}
               title={item.title}
-              className="inline-flex max-w-[190px] items-center gap-1 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] text-slate-600 transition-colors hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700"
+              className="inline-flex max-w-[190px] items-center gap-1 rounded-full border border-border bg-card px-2 py-0.5 text-[11px] text-foreground/80 transition-colors hover:border-primary/40 hover:bg-accent hover:text-primary/80"
             >
               <span className="truncate font-medium">{chipLabel(item)}</span>
-              <span className="text-slate-300" aria-hidden>
+              <span className="text-muted-foreground/60" aria-hidden>
                 ↗
               </span>
             </button>
@@ -152,6 +154,7 @@ export function EvidenceSheet({
   contributionsById,
   focusId,
   color,
+  peers,
 }: {
   open: boolean;
   onClose: () => void;
@@ -162,6 +165,8 @@ export function EvidenceSheet({
   contributionsById: Map<string, ScoredContribution>;
   focusId: string | null;
   color: string;
+  /** Everyone on the split, for the radar's team average. */
+  peers?: ScoredPerson[];
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
 
@@ -213,7 +218,7 @@ export function EvidenceSheet({
         aria-label="Close evidence"
         onClick={onClose}
         className={cn(
-          "absolute inset-0 bg-slate-900/30 backdrop-blur-[1px] transition-opacity duration-300",
+          "absolute inset-0 bg-black/40 backdrop-blur-[1px] transition-opacity duration-300",
           open ? "opacity-100" : "opacity-0"
         )}
       />
@@ -225,18 +230,18 @@ export function EvidenceSheet({
         aria-label={person ? `Evidence for ${person.person}` : "Evidence"}
         tabIndex={-1}
         className={cn(
-          "absolute inset-y-0 right-0 flex w-full max-w-md flex-col border-l border-slate-200 bg-white shadow-2xl outline-none transition-transform duration-300 ease-out",
+          "absolute inset-y-0 right-0 flex w-full max-w-md flex-col border-l border-border bg-card shadow-2xl outline-none transition-transform duration-300 ease-out",
           open ? "translate-x-0" : "translate-x-full"
         )}
       >
         {person && (
           <>
-            <div className="flex items-start justify-between gap-3 border-b border-slate-200 px-5 py-4">
+            <div className="flex items-start justify-between gap-3 border-b border-border px-5 py-4">
               <div className="flex items-center gap-3">
                 <Avatar name={person.person} />
                 <div>
-                  <p className="font-semibold text-slate-900">{person.person}</p>
-                  <p className="text-xs text-slate-500">
+                  <p className="font-semibold text-foreground">{person.person}</p>
+                  <p className="text-xs text-muted-foreground">
                     {sharePct.toFixed(2)}% under {modeLabel} · {money(amountCents / 100)}
                   </p>
                 </div>
@@ -253,28 +258,39 @@ export function EvidenceSheet({
                   style={{ backgroundColor: color }}
                   aria-hidden
                 />
-                <span className="text-xs text-slate-500">
+                <span className="text-xs text-muted-foreground">
                   Each item was judged by the model; every percentage is computed in code.
                 </span>
               </div>
 
-              <p className="mt-3 rounded-lg bg-slate-50 px-3 py-3 text-sm leading-relaxed text-slate-700">
-                {person.reason}
+              <p className="mt-3 rounded-lg bg-muted/50 px-3 py-3 text-sm leading-relaxed text-foreground/80">
+                {cleanReason(person.reason)}
               </p>
 
               {person.range && (
-                <p className="mt-2 text-xs text-amber-700">
+                <p className="mt-2 text-xs text-warning-foreground dark:text-warning">
                   Merit share ranged {person.range.minMeritPct.toFixed(1)}–
                   {person.range.maxMeritPct.toFixed(1)}% across runs.
                 </p>
               )}
 
+              {peers && !person.zeroActivity && (
+                <div className="mt-4">
+                  <ContributorRadar
+                    person={person}
+                    peers={peers}
+                    contributions={[...contributionsById.values()]}
+                    color={color}
+                  />
+                </div>
+              )}
+
               <div className="mt-5 space-y-5">
                 {groups.map((group) => (
                   <section key={group.category}>
-                    <h3 className="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                    <h3 className="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                       {CATEGORY_LABEL[group.category]}
-                      <span className="font-normal normal-case text-slate-300">
+                      <span className="font-normal normal-case text-muted-foreground/60">
                         {group.items.length} item{group.items.length === 1 ? "" : "s"}
                       </span>
                     </h3>
@@ -286,15 +302,15 @@ export function EvidenceSheet({
                           className={cn(
                             "rounded-xl border p-3 transition-colors",
                             focusId === item.id
-                              ? "border-blue-300 bg-blue-50/50 ring-1 ring-blue-200"
-                              : "border-slate-200 bg-white"
+                              ? "border-primary/40 bg-accent/60 ring-1 ring-primary/25"
+                              : "border-border bg-card"
                           )}
                         >
                           <div className="flex items-start justify-between gap-2">
-                            <p className="text-sm font-medium leading-snug text-slate-800">
+                            <p className="text-sm font-medium leading-snug text-foreground">
                               {item.title}
                             </p>
-                            <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-500">
+                            <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
                               {chipLabel(item)}
                             </span>
                           </div>
@@ -304,18 +320,18 @@ export function EvidenceSheet({
                             <ScoreDots label="Complexity" value={item.complexity} />
                           </div>
 
-                          <p className="mt-2 text-xs leading-relaxed text-slate-600">
+                          <p className="mt-2 text-xs leading-relaxed text-foreground/80">
                             “{item.rationale}”
                           </p>
 
-                          <div className="mt-2 flex flex-wrap items-center gap-2 text-[10px] text-slate-400">
+                          <div className="mt-2 flex flex-wrap items-center gap-2 text-[10px] text-muted-foreground">
                             {item.hours > 0 && <span>{item.hours}h logged</span>}
                             {item.linesChanged > 0 && (
                               <span>{item.linesChanged} lines changed</span>
                             )}
                             <span>{formatDate(item.timestamp)}</span>
                             {item.isQuietWork && (
-                              <span className="rounded-full bg-emerald-50 px-1.5 py-0.5 font-medium text-emerald-700">
+                              <span className="rounded-full bg-success/10 px-1.5 py-0.5 font-medium text-success">
                                 quiet work
                               </span>
                             )}
@@ -324,7 +340,7 @@ export function EvidenceSheet({
                                 href={item.evidenceUrl}
                                 target="_blank"
                                 rel="noreferrer"
-                                className="ml-auto font-medium text-blue-600 hover:underline"
+                                className="ml-auto font-medium text-primary hover:underline"
                               >
                                 View source ↗
                               </a>
@@ -340,8 +356,8 @@ export function EvidenceSheet({
               </div>
             </div>
 
-            <div className="border-t border-slate-200 px-5 py-3">
-              <p className="text-[10px] leading-relaxed text-slate-400">
+            <div className="border-t border-border px-5 py-3">
+              <p className="text-[10px] leading-relaxed text-muted-foreground">
                 value = impact × complexity × category weight. Percentages and cents come from
                 code, never from the model.
               </p>

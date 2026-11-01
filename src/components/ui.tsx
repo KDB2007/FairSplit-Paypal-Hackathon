@@ -1,5 +1,13 @@
 "use client";
 
+/**
+ * FairSplit's app primitives, built on the shadcn components in ./ui/.
+ *
+ * Pages import from here with the same API they always had (`tone`, `variant`,
+ * `size`), so the whole app picks up the design tokens and dark mode without
+ * every call site changing at once. New screens can use ./ui/* directly.
+ */
+
 import type {
   ButtonHTMLAttributes,
   HTMLAttributes,
@@ -9,28 +17,44 @@ import type {
   SelectHTMLAttributes,
   TextareaHTMLAttributes,
 } from "react";
-import { cn } from "@/lib/utils";
+import { Check } from "lucide-react";
+import { cn, avatarClass, initials } from "@/lib/utils";
+import { Button as UIButton } from "@/components/ui/button";
+import {
+  Card as UICard,
+  CardContent as UICardContent,
+  CardDescription as UICardDescription,
+  CardHeader as UICardHeader,
+  CardTitle as UICardTitle,
+} from "@/components/ui/card";
+import { Input as UIInput } from "@/components/ui/input";
+import { Textarea as UITextarea } from "@/components/ui/textarea";
+import { NativeSelect } from "@/components/ui/native-select";
+import { Label as UILabel } from "@/components/ui/label";
+import { Badge as UIBadge } from "@/components/ui/badge";
+import { Alert as UIAlert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Progress as ProgressPrimitive } from "@base-ui/react/progress";
+import { ProgressIndicator, ProgressTrack } from "@/components/ui/progress";
+import { Avatar as UIAvatar, AvatarFallback } from "@/components/ui/avatar";
+import { Spinner as UISpinner } from "@/components/ui/spinner";
 
 /* -------------------------------- Button --------------------------------- */
 
 type ButtonVariant = "primary" | "secondary" | "outline" | "ghost" | "danger";
 type ButtonSize = "sm" | "md" | "lg";
 
-const BUTTON_VARIANTS: Record<ButtonVariant, string> = {
-  primary:
-    "bg-blue-600 text-white hover:bg-blue-700 focus-visible:ring-blue-500 shadow-sm",
-  secondary:
-    "bg-slate-900 text-white hover:bg-slate-800 focus-visible:ring-slate-700 shadow-sm",
-  outline:
-    "border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 focus-visible:ring-slate-400 shadow-sm",
-  ghost: "text-slate-600 hover:bg-slate-100 hover:text-slate-900",
-  danger: "bg-rose-600 text-white hover:bg-rose-700 focus-visible:ring-rose-500 shadow-sm",
-};
+const VARIANT_MAP = {
+  primary: "default",
+  secondary: "secondary",
+  outline: "outline",
+  ghost: "ghost",
+  danger: "destructive",
+} as const;
 
-const BUTTON_SIZES: Record<ButtonSize, string> = {
+const SIZE_CLASS: Record<ButtonSize, string> = {
   sm: "h-8 px-3 text-xs",
-  md: "h-10 px-4 text-sm",
-  lg: "h-12 px-6 text-base",
+  md: "h-9 px-4",
+  lg: "h-11 px-6 text-[0.95rem]",
 };
 
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
@@ -38,123 +62,73 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   size?: ButtonSize;
 }
 
-export function Button({
-  variant = "primary",
-  size = "md",
-  className,
-  children,
-  ...props
-}: ButtonProps) {
+export function Button({ variant = "primary", size = "md", className, ...props }: ButtonProps) {
   return (
-    <button
-      className={cn(
-        "inline-flex items-center justify-center gap-2 rounded-lg font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50",
-        BUTTON_VARIANTS[variant],
-        BUTTON_SIZES[size],
-        className
-      )}
+    <UIButton
+      variant={VARIANT_MAP[variant]}
+      className={cn("gap-2", variant === "primary" && "shadow-sm", SIZE_CLASS[size], className)}
       {...props}
-    >
-      {children}
-    </button>
+    />
   );
 }
 
 /* --------------------------------- Card ---------------------------------- */
 
 export function Card({ className, ...props }: HTMLAttributes<HTMLDivElement>) {
-  return (
-    <div
-      className={cn(
-        "rounded-xl border border-slate-200 bg-white shadow-sm",
-        className
-      )}
-      {...props}
-    />
-  );
+  return <UICard className={cn("gap-0 py-0 shadow-xs", className)} {...props} />;
 }
 
 export function CardHeader({ className, ...props }: HTMLAttributes<HTMLDivElement>) {
-  return <div className={cn("border-b border-slate-100 px-5 py-4", className)} {...props} />;
+  return <UICardHeader className={cn("border-b px-5 py-4", className)} {...props} />;
 }
 
-export function CardTitle({ className, ...props }: HTMLAttributes<HTMLHeadingElement>) {
-  return (
-    <h3
-      className={cn("text-base font-semibold text-slate-900", className)}
-      {...props}
-    />
-  );
+export function CardTitle({ className, ...props }: HTMLAttributes<HTMLDivElement>) {
+  return <UICardTitle className={cn("font-semibold tracking-tight", className)} {...props} />;
 }
 
-export function CardDescription({ className, ...props }: HTMLAttributes<HTMLParagraphElement>) {
-  return <p className={cn("mt-0.5 text-sm text-slate-500", className)} {...props} />;
+export function CardDescription({ className, ...props }: HTMLAttributes<HTMLDivElement>) {
+  return <UICardDescription className={cn("mt-0.5", className)} {...props} />;
 }
 
 export function CardContent({ className, ...props }: HTMLAttributes<HTMLDivElement>) {
-  return <div className={cn("px-5 py-4", className)} {...props} />;
+  return <UICardContent className={cn("px-5 py-4", className)} {...props} />;
 }
 
 /* -------------------------------- Inputs --------------------------------- */
 
 export function Input({ className, ...props }: InputHTMLAttributes<HTMLInputElement>) {
-  return (
-    <input
-      className={cn(
-        "h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-900 placeholder:text-slate-400 shadow-sm transition-colors focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 disabled:cursor-not-allowed disabled:opacity-50",
-        className
-      )}
-      {...props}
-    />
-  );
+  return <UIInput className={cn("h-9", className)} {...props} />;
 }
 
 export function Textarea({ className, ...props }: TextareaHTMLAttributes<HTMLTextAreaElement>) {
-  return (
-    <textarea
-      className={cn(
-        "w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 shadow-sm transition-colors focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 disabled:cursor-not-allowed disabled:opacity-50",
-        className
-      )}
-      {...props}
-    />
-  );
+  return <UITextarea className={className} {...props} />;
 }
 
-export function Select({ className, children, ...props }: SelectHTMLAttributes<HTMLSelectElement>) {
+export function Select({ className, children, size: _size, ...props }: SelectHTMLAttributes<HTMLSelectElement>) {
+  void _size; // native `size` (visible rows) isn't used here and clashes with NativeSelect's size variant
   return (
-    <select
-      className={cn(
-        "h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-900 shadow-sm transition-colors focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 disabled:cursor-not-allowed disabled:opacity-50",
-        className
-      )}
-      {...props}
-    >
+    <NativeSelect className={cn("w-full [&_select]:h-9", className)} {...props}>
       {children}
-    </select>
+    </NativeSelect>
   );
 }
 
 export function Label({ className, ...props }: LabelHTMLAttributes<HTMLLabelElement>) {
-  return (
-    <label
-      className={cn("mb-1.5 block text-sm font-medium text-slate-700", className)}
-      {...props}
-    />
-  );
+  return <UILabel className={cn("mb-1.5 text-muted-foreground", className)} {...props} />;
 }
 
 /* -------------------------------- Badges --------------------------------- */
 
 type BadgeTone = "slate" | "blue" | "emerald" | "amber" | "rose" | "violet";
 
+/** Tones are kept for call-site compatibility; they map to semantic tokens. */
 const BADGE_TONES: Record<BadgeTone, string> = {
-  slate: "bg-slate-100 text-slate-600 border-slate-200",
-  blue: "bg-blue-50 text-blue-700 border-blue-200",
-  emerald: "bg-emerald-50 text-emerald-700 border-emerald-200",
-  amber: "bg-amber-50 text-amber-700 border-amber-200",
-  rose: "bg-rose-50 text-rose-700 border-rose-200",
-  violet: "bg-violet-50 text-violet-700 border-violet-200",
+  slate: "border-border bg-muted text-muted-foreground",
+  blue: "border-info/25 bg-info/10 text-info",
+  emerald: "border-success/25 bg-success/10 text-success",
+  amber: "border-warning/35 bg-warning/15 text-warning-foreground dark:text-warning",
+  rose: "border-destructive/25 bg-destructive/10 text-destructive",
+  violet: "border-primary/25 bg-primary/10 text-primary",
 };
 
 export function Badge({
@@ -167,145 +141,106 @@ export function Badge({
   children: ReactNode;
 }) {
   return (
-    <span
-      className={cn(
-        "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium",
-        BADGE_TONES[tone],
-        className
-      )}
-    >
+    <UIBadge variant="outline" className={cn(BADGE_TONES[tone], className)}>
       {children}
-    </span>
+    </UIBadge>
   );
 }
 
 /* -------------------------------- Avatar --------------------------------- */
 
-export function Avatar({ name, className }: { name: string; className?: string }) {
-  const initials = name
-    .split(/\s+/)
-    .map((p) => p[0])
-    .filter(Boolean)
-    .slice(0, 2)
-    .join("")
-    .toUpperCase();
-  const colors = [
-    "bg-blue-100 text-blue-700",
-    "bg-emerald-100 text-emerald-700",
-    "bg-amber-100 text-amber-700",
-    "bg-violet-100 text-violet-700",
-    "bg-rose-100 text-rose-700",
-  ];
-  let hash = 0;
-  for (let i = 0; i < name.length; i++) hash = (hash + name.charCodeAt(i)) % colors.length;
+export function Avatar({ name, color, className }: { name: string; color?: string; className?: string }) {
+  // With a person colour (see lib/person-color) the avatar matches their charts;
+  // without one it falls back to a stable colour hashed from the name.
   return (
-    <span
-      className={cn(
-        "inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-semibold",
-        colors[hash],
-        className
-      )}
-    >
-      {initials}
-    </span>
+    <UIAvatar className={cn("size-9", className)}>
+      <AvatarFallback
+        className={cn("text-xs font-semibold", !color && avatarClass(name))}
+        style={color ? { backgroundColor: `color-mix(in oklch, ${color} 16%, transparent)`, color } : undefined}
+      >
+        {initials(name)}
+      </AvatarFallback>
+    </UIAvatar>
   );
 }
 
 /* ------------------------------- Progress -------------------------------- */
 
-export function Progress({ value, tone = "blue" }: { value: number; tone?: "blue" | "emerald" | "amber" | "violet" }) {
-  const tones = {
-    blue: "bg-blue-500",
-    emerald: "bg-emerald-500",
-    amber: "bg-amber-500",
-    violet: "bg-violet-500",
-  };
+const PROGRESS_TONES = {
+  blue: "bg-primary",
+  emerald: "bg-success",
+  amber: "bg-warning",
+  violet: "bg-chart-1",
+} as const;
+
+export function Progress({ value, tone = "blue" }: { value: number; tone?: keyof typeof PROGRESS_TONES }) {
   return (
-    <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
-      <div
-        className={cn("h-full rounded-full transition-all", tones[tone])}
-        style={{ width: `${Math.min(100, Math.max(0, value))}%` }}
-      />
-    </div>
+    <ProgressPrimitive.Root value={Math.min(100, Math.max(0, value))} data-slot="progress">
+      <ProgressTrack className="h-1.5">
+        <ProgressIndicator className={PROGRESS_TONES[tone]} />
+      </ProgressTrack>
+    </ProgressPrimitive.Root>
   );
 }
 
 /* -------------------------------- Alert ---------------------------------- */
+
+const ALERT_TONES = {
+  info: "border-info/25 bg-info/5 text-info *:data-[slot=alert-description]:text-foreground/80",
+  success: "border-success/25 bg-success/5 text-success *:data-[slot=alert-description]:text-foreground/80",
+  warning:
+    "border-warning/40 bg-warning/10 text-warning-foreground dark:text-warning *:data-[slot=alert-description]:text-foreground/80",
+  error: "border-destructive/25 bg-destructive/5 text-destructive *:data-[slot=alert-description]:text-foreground/80",
+};
 
 export function Alert({
   tone = "info",
   title,
   children,
 }: {
-  tone?: "info" | "success" | "warning" | "error";
+  tone?: keyof typeof ALERT_TONES;
   title?: string;
   children?: ReactNode;
 }) {
-  const tones = {
-    info: "border-blue-200 bg-blue-50 text-blue-800",
-    success: "border-emerald-200 bg-emerald-50 text-emerald-800",
-    warning: "border-amber-200 bg-amber-50 text-amber-800",
-    error: "border-rose-200 bg-rose-50 text-rose-800",
-  };
   return (
-    <div className={cn("rounded-lg border px-4 py-3 text-sm", tones[tone])} role="status">
-      {title && <p className="font-semibold">{title}</p>}
-      {children && <div className={cn(title && "mt-1")}>{children}</div>}
-    </div>
+    <UIAlert className={cn("px-4 py-3", ALERT_TONES[tone])} role={tone === "error" ? "alert" : "status"}>
+      {title && <AlertTitle className="font-semibold">{title}</AlertTitle>}
+      {children && (
+        <AlertDescription className={cn("text-sm", !title && "text-current")}>{children}</AlertDescription>
+      )}
+    </UIAlert>
   );
 }
 
 /* -------------------------------- Spinner -------------------------------- */
 
 export function Spinner({ className }: { className?: string }) {
-  return (
-    <span
-      className={cn(
-        "inline-block h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent",
-        className
-      )}
-      aria-label="Loading"
-    />
-  );
+  return <UISpinner className={className} />;
 }
 
 /* -------------------------------- Stepper -------------------------------- */
 
-export function Stepper({
-  steps,
-  current,
-}: {
-  steps: string[];
-  current: number;
-}) {
+export function Stepper({ steps, current }: { steps: string[]; current: number }) {
   return (
-    <ol className="flex flex-wrap items-center gap-2 text-sm">
+    <ol className="flex flex-wrap items-center gap-2 text-sm" aria-label="Progress">
       {steps.map((step, index) => {
-        const state =
-          index < current ? "done" : index === current ? "active" : "todo";
+        const state = index < current ? "done" : index === current ? "active" : "todo";
         return (
-          <li key={step} className="flex items-center gap-2">
+          <li key={step} className="flex items-center gap-2" aria-current={state === "active" ? "step" : undefined}>
             <span
               className={cn(
-                "flex h-6 w-6 items-center justify-center rounded-full text-xs font-semibold",
-                state === "done" && "bg-emerald-500 text-white",
-                state === "active" && "bg-blue-600 text-white",
-                state === "todo" && "bg-slate-200 text-slate-500"
+                "flex size-6 items-center justify-center rounded-full text-xs font-semibold transition-colors",
+                state === "done" && "bg-success text-success-foreground",
+                state === "active" && "bg-primary text-primary-foreground ring-4 ring-primary/15",
+                state === "todo" && "bg-muted text-muted-foreground"
               )}
             >
-              {state === "done" ? "✓" : index + 1}
+              {state === "done" ? <Check className="size-3.5" aria-label="done" /> : index + 1}
             </span>
-            <span
-              className={cn(
-                "font-medium",
-                state === "active" ? "text-slate-900" : "text-slate-500"
-              )}
-            >
+            <span className={cn("font-medium", state === "active" ? "text-foreground" : "text-muted-foreground")}>
               {step}
             </span>
-            {index < steps.length - 1 && (
-              <span className="mx-1 h-px w-6 bg-slate-300" aria-hidden />
-            )}
+            {index < steps.length - 1 && <span className="mx-1 h-px w-6 bg-border" aria-hidden />}
           </li>
         );
       })}
@@ -315,16 +250,6 @@ export function Stepper({
 
 /* ------------------------------- Page shell ------------------------------ */
 
-export function PageShell({
-  children,
-  className,
-}: {
-  children: ReactNode;
-  className?: string;
-}) {
-  return (
-    <main className={cn("mx-auto w-full max-w-6xl px-4 py-8 sm:px-6", className)}>
-      {children}
-    </main>
-  );
+export function PageShell({ children, className }: { children: ReactNode; className?: string }) {
+  return <main className={cn("mx-auto w-full max-w-6xl px-4 py-8 sm:px-6", className)}>{children}</main>;
 }

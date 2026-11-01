@@ -19,7 +19,6 @@ import { reattribute, unmatchedAuthors } from "./integrations/identity";
  * hot reloads during development and route/page module duplication.
  */
 declare global {
-  // eslint-disable-next-line no-var
   var __fairsplitStore: Map<string, Project> | undefined;
 }
 
@@ -55,6 +54,15 @@ export function saveProject(project: Project): Project {
   return project;
 }
 
+/**
+ * Remove a project. The demo project is protected: it is seeded on demand, so
+ * deleting it would only make it reappear on the next read.
+ */
+export function deleteProject(id: string): boolean {
+  if (id === DEMO_PROJECT_ID) return false;
+  return store.delete(id);
+}
+
 export function summarise(project: Project): ProjectSummary {
   return {
     id: project.id,
@@ -64,7 +72,18 @@ export function summarise(project: Project): ProjectSummary {
     philosophy: project.philosophy,
     memberCount: project.members.length,
     createdAt: project.createdAt,
+    members: project.members.map((m) => m.name),
+    split: summarySplit(project),
+    paidCents: project.payouts.reduce((sum, p) => sum + Math.round(p.amount * 100), 0),
   };
+}
+
+function summarySplit(project: Project): ProjectSummary["split"] {
+  const rows = project.decisions.length
+    ? project.decisions.map((d) => ({ person: d.person, pct: d.finalPct }))
+    : project.proposals.map((p) => ({ person: p.person, pct: p.percentage }));
+  if (rows.length === 0) return null;
+  return allocate(project, rows).map((a) => ({ person: a.person, cents: a.totalCents }));
 }
 
 export interface CreateProjectInput {

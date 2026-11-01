@@ -41,9 +41,12 @@ Include exactly one object per input contribution id, covering every id given, i
 export const STEP3_SYSTEM = `You explain a split of a fixed project payment to the team that did the work.
 You are given each person's already-computed percentages and their strongest
 contributions. Explain in plain language why this person's share is what it is.
-Do not change the numbers, recompute them, or state different ones; refer to
-them qualitatively. Cite only contribution IDs that appear in the input for
-that person. Mention quiet work (review, unblocking, client communication,
+Never write a percentage, a dollar amount or any other number in the reason —
+the app shows the exact figures beside it, and the split shown may be any of
+the four modes. Describe the share qualitatively ("the largest share", "about
+an equal share"). Put contribution IDs only in evidence_ids, never in the
+reason text. Cite only contribution IDs that appear in the input for that
+person. Mention quiet work (review, unblocking, client communication,
 admin, planning) when it materially shaped someone's share. Each reason must be
 at most two sentences.
 

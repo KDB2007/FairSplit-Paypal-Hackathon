@@ -1,6 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
+import { AnimatePresence, LayoutGroup, motion, useReducedMotion } from "motion/react";
+import { Lightbulb, RotateCcw, Sparkles } from "lucide-react";
 import type {
   Project,
   ScoreMode,
@@ -22,7 +24,13 @@ import {
   Select,
   Spinner,
 } from "@/components/ui";
+import AICitations, { type AnswerPart, type CitationSource } from "@/components/kokonutui/ai-citations";
+import { NumberTicker } from "@/components/motion/number-ticker";
+import { useTasks } from "@/components/app-shell/tasks";
 import { EvidenceChips, EvidenceSheet } from "./evidence-sheet";
+import { ScoringProgress } from "./scoring-progress";
+import { cleanReason } from "./clean-reason";
+import { ModeSlopeChart } from "./mode-slope-chart";
 import { HowCalculated } from "./how-calculated";
 import {
   ConfidencePill,
@@ -30,7 +38,6 @@ import {
   MODE_LABEL,
   MODES,
   ShareBar,
-  SplitDonut,
   amountForMode,
   peopleColorMap,
   rankPeople,
@@ -39,16 +46,9 @@ import {
 
 type Phase = "idle" | "scoring" | "done" | "error";
 
-const MIN_SCORING_MS = 1500;
-const REVEAL_STEP_MS = 120;
-
-function prefersReducedMotion(): boolean {
-  return (
-    typeof window !== "undefined" &&
-    typeof window.matchMedia === "function" &&
-    window.matchMedia("(prefers-reduced-motion: reduce)").matches
-  );
-}
+const MIN_SCORING_MS = 2400;
+const CARD_STAGGER_S = 0.12;
+const EASE_OUT = [0.16, 1, 0.3, 1] as const;
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -73,22 +73,23 @@ export function ExplainableSplit({
   const [liveSplit, setLiveSplit] = useState<ScoredSplit | null>(split);
   const [phase, setPhase] = useState<Phase>(split ? "done" : "idle");
   const [mode, setMode] = useState<ScoreMode>(split?.defaultMode ?? "merit");
-  const [messageIndex, setMessageIndex] = useState(0);
   const [scoreError, setScoreError] = useState<string | null>(null);
-  const [revealed, setRevealed] = useState(0);
+  const [scoreDone, setScoreDone] = useState(false);
+  const reduce = useReducedMotion();
+  const { track } = useTasks();
   const [assignments, setAssignments] = useState<Record<string, string>>({});
   const [pendingAssignment, setPendingAssignment] = useState<Record<string, string>>({});
   const [sheet, setSheet] = useState<{ personId: string; focusId: string | null } | null>(
     null
   );
 
-  const appliedSignature = useRef<string | null>(split?.generatedAt ?? null);
+  const [appliedSignature, setAppliedSignature] = useState<string | null>(split?.generatedAt ?? null);
 
   // A fresh score from the server (reload, re-score) replaces local state.
-  useEffect(() => {
-    const signature = split?.generatedAt ?? null;
-    if (signature === appliedSignature.current) return;
-    appliedSignature.current = signature;
+  // Adjusted during render rather than in an effect, so there's no extra paint with stale state.
+  const signature = split?.generatedAt ?? null;
+  if (signature !== appliedSignature) {
+    setAppliedSignature(signature);
     setBaseSplit(split);
     setLiveSplit(split);
     setAssignments({});
@@ -99,53 +100,21 @@ export function ExplainableSplit({
     } else {
       setPhase("idle");
     }
-  }, [split]);
-
-  // Progressive card reveal when a split becomes visible.
-  const revealSignature = liveSplit?.generatedAt ?? "none";
-  const peopleCount = liveSplit?.people.length ?? 0;
-  useEffect(() => {
-    if (phase !== "done" || peopleCount === 0) {
-      setRevealed(0);
-      return;
-    }
-    if (prefersReducedMotion()) {
-      setRevealed(peopleCount);
-      return;
-    }
-    setRevealed(1);
-    let current = 1;
-    const timer = window.setInterval(() => {
-      current += 1;
-      setRevealed(current);
-      if (current >= peopleCount) window.clearInterval(timer);
-    }, REVEAL_STEP_MS);
-    return () => window.clearInterval(timer);
-  }, [phase, revealSignature, peopleCount]);
-
-  const messages = useMemo(
-    () => [
-      `Reading ${project.contributions.length} activities…`,
-      "Classifying quiet work…",
-      "Computing the split…",
-    ],
-    [project.contributions.length]
-  );
+  }
 
   async function runScore() {
     setScoreError(null);
+    setScoreDone(false);
     setPhase("scoring");
-    setMessageIndex(0);
     const startedAt = Date.now();
-    const ticker = window.setInterval(
-      () => setMessageIndex((index) => Math.min(index + 1, messages.length - 1)),
-      700
-    );
 
     try {
-      const result = await scoreProject(project.id);
+      const result = await track("AI scoring", scoreProject(project.id), `${project.contributions.length} activities`);
       const elapsed = Date.now() - startedAt;
-      if (elapsed < MIN_SCORING_MS) await sleep(MIN_SCORING_MS - elapsed);
+      // Let the pipeline read before the reveal, without inventing extra work.
+      if (!reduce && elapsed < MIN_SCORING_MS) await sleep(MIN_SCORING_MS - elapsed);
+      setScoreDone(true);
+      if (!reduce) await sleep(650);
 
       setBaseSplit(result.split);
       setLiveSplit(result.split);
@@ -157,8 +126,6 @@ export function ExplainableSplit({
     } catch (error) {
       setScoreError(error instanceof Error ? error.message : "Scoring failed.");
       setPhase("error");
-    } finally {
-      window.clearInterval(ticker);
     }
   }
 
@@ -208,7 +175,9 @@ export function ExplainableSplit({
 
   const hidden = liveSplit?.people.find((person) => person.hiddenContributor) ?? null;
   const hiddenShortfallCents = hidden
-    ? hidden.workAmountsByMode.merit - hidden.workAmountsByMode.equal
+    ? // Splits saved before the layered pool have no workAmountsByMode; fall back to totals.
+      (hidden.workAmountsByMode ?? hidden.amountsByMode).merit -
+      (hidden.workAmountsByMode ?? hidden.amountsByMode).equal
     : 0;
 
   const sheetPerson =
@@ -224,8 +193,8 @@ export function ExplainableSplit({
             📥
           </span>
           <div>
-            <p className="text-base font-semibold text-slate-900">Nothing to score yet</p>
-            <p className="mx-auto mt-1 max-w-sm text-sm text-slate-500">
+            <p className="text-base font-semibold text-foreground">Nothing to score yet</p>
+            <p className="mx-auto mt-1 max-w-sm text-sm text-muted-foreground">
               Sync GitHub or Trello, or log quiet work, then come back. The scorer needs
               at least one activity to explain.
             </p>
@@ -244,7 +213,7 @@ export function ExplainableSplit({
         <CardHeader className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <CardTitle>Explainable split</CardTitle>
-            <p className="mt-0.5 text-sm text-slate-500">
+            <p className="mt-0.5 text-sm text-muted-foreground">
               {project.contributions.length} activities across {project.members.length} members.
               The model judges each one; code does the maths.
             </p>
@@ -267,12 +236,12 @@ export function ExplainableSplit({
                 body: "Every share gets a plain-language reason and clickable evidence you can audit.",
               },
             ].map((item, index) => (
-              <div key={item.title} className="rounded-xl border border-slate-200 bg-slate-50/60 p-4">
-                <span className="flex h-6 w-6 items-center justify-center rounded-full bg-slate-900 text-[11px] font-semibold text-white">
+              <div key={item.title} className="rounded-xl border border-border bg-muted/40 p-4">
+                <span className="flex h-6 w-6 items-center justify-center rounded-full bg-foreground text-[11px] font-semibold text-background">
                   {index + 1}
                 </span>
-                <p className="mt-2 text-sm font-semibold text-slate-900">{item.title}</p>
-                <p className="mt-1 text-xs leading-relaxed text-slate-500">{item.body}</p>
+                <p className="mt-2 text-sm font-semibold text-foreground">{item.title}</p>
+                <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{item.body}</p>
               </div>
             ))}
           </div>
@@ -280,7 +249,7 @@ export function ExplainableSplit({
             <Button onClick={runScore} disabled={project.members.length === 0}>
               Score with AI
             </Button>
-            <p className="text-xs text-slate-400">
+            <p className="text-xs text-muted-foreground">
               Runs three independent judgments to check its own confidence.
             </p>
           </div>
@@ -294,23 +263,14 @@ export function ExplainableSplit({
   if (phase === "scoring") {
     return (
       <Card>
-        <CardContent className="flex flex-col items-center gap-5 py-20">
-          <span className="relative flex h-12 w-12 items-center justify-center">
-            <span className="absolute inset-0 animate-ping rounded-full bg-blue-100" />
-            <span className="relative flex h-9 w-9 items-center justify-center rounded-full bg-blue-600 text-white">
-              <Spinner className="h-4 w-4 border-white" />
-            </span>
-          </span>
-          <p className="text-sm font-medium text-slate-700" role="status" aria-live="polite">
-            {messages[messageIndex]}
-          </p>
-          <div className="h-1 w-52 overflow-hidden rounded-full bg-slate-100">
-            <div
-              className="h-full rounded-full bg-blue-500 transition-all duration-700 ease-out"
-              style={{ width: `${((messageIndex + 1) / messages.length) * 100}%` }}
-            />
+        <CardContent className="flex flex-col items-center gap-6 py-14">
+          <div className="text-center">
+            <p className="flex items-center justify-center gap-2 text-sm font-semibold">
+              <Sparkles className="size-4 text-primary" /> Scoring {project.name}
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground">The model judges each item; code does the maths.</p>
           </div>
-          <p className="text-xs text-slate-400">The model judges; code does the maths.</p>
+          <ScoringProgress project={project} done={scoreDone} failed={false} />
         </CardContent>
       </Card>
     );
@@ -322,13 +282,14 @@ export function ExplainableSplit({
     return (
       <Card>
         <CardContent className="space-y-4 py-12">
-          <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3">
-            <p className="text-sm font-semibold text-rose-800">Scoring failed</p>
-            <p className="mt-1 text-sm text-rose-700">
+          <ScoringProgress project={project} done={false} failed />
+          <div className="rounded-lg border border-destructive/25 bg-destructive/5 px-4 py-3">
+            <p className="text-sm font-semibold text-destructive">Scoring failed</p>
+            <p className="mt-1 text-sm text-foreground/80">
               {scoreError ?? "The scoring model did not return a usable response."}
             </p>
           </div>
-          <p className="text-xs text-slate-500">
+          <p className="text-xs text-muted-foreground">
             Your contributions are untouched. Retry, or go back and check the activity list.
           </p>
           <div className="flex flex-wrap gap-2">
@@ -360,43 +321,50 @@ export function ExplainableSplit({
               <CardTitle>Explainable split</CardTitle>
               <ConfidencePill split={liveSplit} />
             </div>
-            <p className="mt-1 text-sm text-slate-500">
+            <p className="mt-1 text-sm text-muted-foreground">
               {project.name} · {money(liveSplit.totalAmountCents / 100)} ·{" "}
               {liveSplit.contributions.length} judged activities
               {liveSplit.unassigned.length > 0 && ` · ${liveSplit.unassigned.length} unassigned`}
             </p>
           </div>
           <Button variant="outline" onClick={runScore} disabled={continuing}>
-            ↻ Re-score
+            <RotateCcw className="size-4" /> Re-score
           </Button>
         </CardHeader>
         <CardContent>
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-0.5">
-              {MODES.map((option) => (
-                <button
-                  key={option}
-                  type="button"
-                  title={MODE_HINT[option]}
-                  aria-pressed={mode === option}
-                  onClick={() => setMode(option)}
-                  className={cn(
-                    "rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
-                    mode === option
-                      ? "bg-slate-900 text-white shadow-sm"
-                      : "text-slate-600 hover:bg-white hover:text-slate-900"
-                  )}
-                >
-                  {MODE_LABEL[option]}
-                </button>
-              ))}
-            </div>
-            <p className="text-xs text-slate-400">
+            <LayoutGroup id="mode-toggle">
+              <div className="inline-flex rounded-lg border border-border bg-muted/50 p-0.5" role="group" aria-label="Split mode">
+                {MODES.map((option) => (
+                  <button
+                    key={option}
+                    type="button"
+                    title={MODE_HINT[option]}
+                    aria-pressed={mode === option}
+                    onClick={() => setMode(option)}
+                    className={cn(
+                      "relative rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
+                      mode === option ? "text-background" : "text-foreground/80 hover:text-foreground"
+                    )}
+                  >
+                    {mode === option && (
+                      <motion.span
+                        layoutId="mode-pill"
+                        className="absolute inset-0 rounded-md bg-foreground shadow-sm"
+                        transition={{ type: "spring", duration: reduce ? 0 : 0.35, bounce: 0.15 }}
+                      />
+                    )}
+                    <span className="relative">{MODE_LABEL[option]}</span>
+                  </button>
+                ))}
+              </div>
+            </LayoutGroup>
+            <p className="text-xs text-muted-foreground">
               Switching is instant — all four splits were computed up front. No new AI call.
             </p>
           </div>
           {mode === "hours" && liveSplit.formula.hoursFallback && (
-            <p className="mt-2 text-xs text-amber-700">
+            <p className="mt-2 text-xs text-warning-foreground dark:text-warning">
               No hours were logged, so Hours mode falls back to an equal split.
             </p>
           )}
@@ -405,14 +373,15 @@ export function ExplainableSplit({
 
       {/* The insight banner */}
       {hidden && hiddenShortfallCents > 0 && (
-        <div
+        <motion.div
           role="status"
-          className="flex flex-wrap items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3"
+          initial={reduce ? false : { opacity: 0, y: -8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.4, delay: reduce ? 0 : 0.5, ease: EASE_OUT }}
+          className="flex flex-wrap items-center gap-3 rounded-xl border border-warning/40 bg-warning/10 px-4 py-3"
         >
-          <span className="text-lg" aria-hidden>
-            💡
-          </span>
-          <p className="min-w-0 flex-1 text-sm text-amber-900">
+          <Lightbulb className="size-5 shrink-0 text-warning-foreground dark:text-warning" aria-hidden />
+          <p className="min-w-0 flex-1 text-sm">
             <span className="font-semibold">
               Equal split would underpay {hidden.person} by{" "}
               {money(hiddenShortfallCents / 100)}.
@@ -425,12 +394,13 @@ export function ExplainableSplit({
               Show merit split
             </Button>
           )}
-        </div>
+        </motion.div>
       )}
 
       <div className="grid grid-cols-[minmax(0,1fr)] gap-5 lg:grid-cols-[minmax(0,1fr)_310px]">
         {/* Ranked member cards */}
-        <div className="space-y-3">
+        <LayoutGroup id="member-cards">
+        <div className="space-y-3" key={liveSplit.generatedAt}>
           {ranked.map((person, index) => {
             const share = requestedShare(person);
             const amount = requestedAmount(person);
@@ -445,9 +415,9 @@ export function ExplainableSplit({
                 share={share}
                 amountCents={amount}
                 delta={delta}
-                color={colors[person.memberId] ?? "#2563eb"}
+                color={colors[person.memberId] ?? "var(--color-person-1)"}
                 isLead={isLead}
-                reveal={index < revealed}
+                order={liveSplit.people.findIndex((p) => p.memberId === person.memberId)}
                 contributionsById={contributionsById}
                 itemCount={itemCounts.get(person.memberId) ?? 0}
                 onOpenEvidence={(focusId) =>
@@ -457,24 +427,15 @@ export function ExplainableSplit({
             );
           })}
         </div>
+        </LayoutGroup>
 
-        {/* Donut + legend */}
+        {/* Shares across modes */}
         <aside className="space-y-4 self-start lg:sticky lg:top-6">
           <Card>
             <CardContent>
-              <SplitDonut
-                people={liveSplit.people}
-                mode={mode}
-                colors={colors}
-                totalCents={liveSplit.layers.workPoolCents}
-                caption={
-                  liveSplit.layers.workPoolCents < liveSplit.totalAmountCents
-                    ? "work pool (after charter fees)"
-                    : "total payout"
-                }
-              />
-              <p className="mt-3 border-t border-slate-100 pt-3 text-center text-xs leading-relaxed text-slate-500">
-                {MODE_HINT[mode]}
+              <ModeSlopeChart people={liveSplit.people} colors={colors} mode={mode} />
+              <p className="mt-3 border-t border-border pt-3 text-xs leading-relaxed text-muted-foreground">
+                <span className="font-medium text-foreground">{MODE_LABEL[mode]}:</span> {MODE_HINT[mode]}
               </p>
             </CardContent>
           </Card>
@@ -489,7 +450,7 @@ export function ExplainableSplit({
           <CardHeader className="flex flex-wrap items-center justify-between gap-2">
             <div>
               <CardTitle>Unassigned activity</CardTitle>
-              <p className="mt-0.5 text-sm text-slate-500">
+              <p className="mt-0.5 text-sm text-muted-foreground">
                 These items were judged but no member matches. Route them to a person and the
                 split recomputes locally — no AI call.
               </p>
@@ -504,11 +465,11 @@ export function ExplainableSplit({
               {liveSplit.unassigned.map((item) => (
                 <li
                   key={item.id}
-                  className="flex flex-wrap items-center gap-3 rounded-lg border border-slate-200 px-3 py-2"
+                  className="flex flex-wrap items-center gap-3 rounded-lg border border-border px-3 py-2"
                 >
                   <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium text-slate-800">{item.title}</p>
-                    <p className="text-xs text-slate-500">
+                    <p className="truncate text-sm font-medium text-foreground">{item.title}</p>
+                    <p className="text-xs text-muted-foreground">
                       from {item.person} · {item.type} · impact {item.impact}/5 · complexity{" "}
                       {item.complexity}/5
                       {item.hours > 0 ? ` · ${item.hours}h` : ""}
@@ -544,7 +505,7 @@ export function ExplainableSplit({
               ))}
             </ul>
             {Object.keys(assignments).length > 0 && (
-              <p className="mt-3 text-xs text-emerald-700">
+              <p className="mt-3 text-xs text-success">
                 Reassigned {Object.keys(assignments).length} item
                 {Object.keys(assignments).length === 1 ? "" : "s"} locally — percentages and
                 cents were recalculated in the browser.
@@ -585,7 +546,8 @@ export function ExplainableSplit({
         amountCents={sheetPerson ? requestedAmount(sheetPerson) : 0}
         contributionsById={contributionsById}
         focusId={sheet?.focusId ?? null}
-        color={sheetPerson ? colors[sheetPerson.memberId] ?? "#2563eb" : "#2563eb"}
+        color={sheetPerson ? colors[sheetPerson.memberId] ?? "var(--color-person-1)" : "var(--color-person-1)"}
+        peers={liveSplit.people}
       />
     </div>
   );
@@ -594,6 +556,32 @@ export function ExplainableSplit({
 /* -------------------------------------------------------------------------- */
 /* Member card                                                                */
 /* -------------------------------------------------------------------------- */
+
+const SOURCE_SITE: Record<ScoredContribution["type"], string> = {
+  pr: "GitHub PR",
+  commit: "GitHub commit",
+  review: "PR review",
+  trello: "Trello",
+  manual: "Logged work",
+};
+
+/** The reason as citation parts: every linkable evidence item is cited after the last sentence. */
+function reasonWithCitations(
+  person: ScoredPerson,
+  contributionsById: Map<string, ScoredContribution>
+): { parts: AnswerPart[]; sources: CitationSource[] } {
+  const sources: CitationSource[] = person.evidenceIds
+    .map((id) => contributionsById.get(id))
+    .filter((c): c is ScoredContribution & { evidenceUrl: string } => Boolean(c?.evidenceUrl))
+    .map((c) => ({ id: c.id, title: c.title, url: c.evidenceUrl, site: SOURCE_SITE[c.type], snippet: c.rationale }));
+  const reason = cleanReason(person.reason);
+  const sentences = reason.match(/[^.!?]+[.!?]+(?:\s+|$)|[^.!?]+$/g) ?? [reason];
+  const parts = sentences.map((text, i) => ({
+    text: text.trim() + (i < sentences.length - 1 ? " " : ""),
+    cite: i === sentences.length - 1 && sources.length ? sources.map((s) => s.id) : undefined,
+  }));
+  return { parts, sources };
+}
 
 function MemberCard({
   person,
@@ -604,7 +592,7 @@ function MemberCard({
   delta,
   color,
   isLead,
-  reveal,
+  order,
   contributionsById,
   itemCount,
   onOpenEvidence,
@@ -617,132 +605,136 @@ function MemberCard({
   delta: number;
   color: string;
   isLead: boolean;
-  reveal: boolean;
+  /** Position in the member list: drives the one-time entrance stagger. */
+  order: number;
   contributionsById: Map<string, ScoredContribution>;
   itemCount: number;
   onOpenEvidence: (id: string) => void;
 }) {
+  const reduce = useReducedMotion();
   const showDelta = Math.abs(delta) >= 0.05;
+  const enterDelay = reduce ? 0 : order * CARD_STAGGER_S;
+  const citations = useMemo(() => reasonWithCitations(person, contributionsById), [person, contributionsById]);
 
   return (
-    <article
+    <motion.article
+      layout={!reduce}
+      initial={reduce ? false : { opacity: 0, y: 14 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.45, delay: enterDelay, ease: EASE_OUT, layout: { duration: 0.4, ease: EASE_OUT } }}
       className={cn(
-        "rounded-xl border bg-white p-4 transition-all duration-300 ease-out",
-        reveal ? "translate-y-0 opacity-100" : "translate-y-2 opacity-0",
-        person.hiddenContributor
-          ? "border-amber-200 shadow-sm ring-1 ring-amber-100"
-          : "border-slate-200"
+        "relative rounded-xl border bg-card p-4",
+        person.hiddenContributor ? "border-warning/50 shadow-sm" : "border-border"
       )}
     >
+      {/* The hidden contributor pulses once, after the cards have landed. */}
+      {person.hiddenContributor && !reduce && (
+        <motion.span
+          aria-hidden
+          className="pointer-events-none absolute inset-0 rounded-xl"
+          initial={{ boxShadow: "0 0 0 0px color-mix(in oklch, var(--warning) 0%, transparent)" }}
+          animate={{
+            boxShadow: [
+              "0 0 0 0px color-mix(in oklch, var(--warning) 45%, transparent)",
+              "0 0 0 10px color-mix(in oklch, var(--warning) 0%, transparent)",
+            ],
+          }}
+          transition={{ duration: 1.2, delay: enterDelay + 0.7, ease: "easeOut" }}
+        />
+      )}
+
       <div className="flex items-start justify-between gap-3">
         <div className="flex min-w-0 items-center gap-3">
           <span
-            className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-bold text-white"
+            className="flex size-6 shrink-0 items-center justify-center rounded-full text-[11px] font-bold text-white"
             style={{ backgroundColor: color }}
             title={`Rank ${rank} under ${MODE_LABEL[mode]}`}
           >
             {rank}
           </span>
-          <Avatar name={person.person} />
+          <Avatar name={person.person} color={color} />
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-1.5">
-              <p className="font-semibold text-slate-900">{person.person}</p>
+              <p className="font-semibold">{person.person}</p>
               {isLead && <Badge tone="slate">Lead</Badge>}
-              {person.hiddenContributor && (
-                <Badge
-                  tone="amber"
-                  className="border-amber-300"
-                >
-                  ✦ Hidden contribution
-                </Badge>
-              )}
+              {person.hiddenContributor && <Badge tone="amber">✦ Hidden contribution</Badge>}
               {person.zeroActivity && <Badge tone="rose">No activity</Badge>}
             </div>
-            <p className="truncate text-xs text-slate-500">
-              {itemCount} item{itemCount === 1 ? "" : "s"} ·{" "}
-              {person.activityCountSharePct.toFixed(1)}% of logged items
-              {person.quietValueSharePct > 0 &&
-                ` · ${Math.round(person.quietValueSharePct)}% quiet value`}
+            <p className="truncate text-xs text-muted-foreground">
+              {itemCount} item{itemCount === 1 ? "" : "s"} · {person.activityCountSharePct.toFixed(1)}% of logged items
+              {person.quietValueSharePct > 0 && ` · ${Math.round(person.quietValueSharePct)}% quiet value`}
             </p>
           </div>
         </div>
 
         <div className="shrink-0 text-right">
-          <p className="text-2xl font-bold tabular-nums leading-none" style={{ color }}>
-            {share.toFixed(2)}%
+          <p className="text-2xl font-bold leading-none" style={{ color }}>
+            <NumberTicker value={share} from={0} delay={enterDelay} duration={0.8} format={(v) => `${v.toFixed(2)}%`} />
           </p>
-          <p className="mt-1 text-sm font-semibold tabular-nums text-slate-700">
-            {money(amountCents / 100)}
+          <p className="mt-1 text-sm font-semibold text-foreground/80">
+            <NumberTicker value={amountCents / 100} from={0} delay={enterDelay} duration={0.8} format={(v) => money(v)} />
           </p>
           {person.finderAmountCents + person.leadAmountCents > 0 && (
-            <p className="text-[10px] tabular-nums text-slate-500">
+            <p className="text-[10px] tabular-nums text-muted-foreground">
               incl. {money((person.finderAmountCents + person.leadAmountCents) / 100)} charter fees
             </p>
           )}
-          <p className="text-[10px] uppercase tracking-wide text-slate-400">
-            {MODE_LABEL[mode]} · of work pool
-          </p>
+          <p className="text-[10px] uppercase tracking-wide text-muted-foreground">{MODE_LABEL[mode]} · of work pool</p>
         </div>
       </div>
 
       <div className="mt-3 flex items-center gap-3">
         <div className="min-w-0 flex-1">
-          <ShareBar
-            value={share}
-            equalValue={person.equalPct}
-            color={color}
-            showEqual={mode !== "equal"}
-          />
+          <ShareBar value={share} equalValue={person.equalPct} color={color} showEqual={mode !== "equal"} delay={enterDelay} />
         </div>
-        {showDelta && (
-          <span
-            className={cn(
-              "shrink-0 rounded-full border px-2 py-0.5 text-[11px] font-medium tabular-nums",
-              delta > 0
-                ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                : "border-rose-200 bg-rose-50 text-rose-700"
-            )}
-            title={`Equal split: ${person.equalPct.toFixed(2)}% · ${MODE_LABEL[mode]}: ${share.toFixed(
-              2
-            )}%`}
-          >
-            {delta > 0 ? "+" : ""}
-            {delta.toFixed(1)} pts vs equal
-          </span>
-        )}
+        <AnimatePresence mode="popLayout" initial={false}>
+          {showDelta && (
+            <motion.span
+              key={delta > 0 ? "up" : "down"}
+              initial={reduce ? false : { opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.9 }}
+              className={cn(
+                "shrink-0 rounded-full border px-2 py-0.5 text-[11px] font-medium tabular-nums",
+                delta > 0 ? "border-success/25 bg-success/10 text-success" : "border-destructive/25 bg-destructive/10 text-destructive"
+              )}
+              title={`Equal split: ${person.equalPct.toFixed(2)}% · ${MODE_LABEL[mode]}: ${share.toFixed(2)}%`}
+            >
+              {delta > 0 ? "+" : ""}
+              {delta.toFixed(1)} pts vs equal
+            </motion.span>
+          )}
+        </AnimatePresence>
       </div>
 
       {person.range && (
-        <p className="mt-1.5 text-[11px] text-amber-700">
-          Range across runs: {person.range.minMeritPct.toFixed(1)}–
-          {person.range.maxMeritPct.toFixed(1)}% merit
+        <p className="mt-1.5 text-[11px] text-warning-foreground dark:text-warning">
+          Range across runs: {person.range.minMeritPct.toFixed(1)}–{person.range.maxMeritPct.toFixed(1)}% merit
         </p>
       )}
 
-      <p className="mt-3 text-sm leading-relaxed text-slate-600">{person.reason}</p>
+      {citations.sources.length > 0 ? (
+        <AICitations parts={citations.parts} sources={citations.sources} className="mt-3 max-w-none text-sm leading-relaxed text-foreground/85" />
+      ) : (
+        <p className="mt-3 text-sm leading-relaxed text-foreground/85">{cleanReason(person.reason)}</p>
+      )}
 
-      <div className="mt-3 border-t border-slate-100 pt-2.5">
+      <div className="mt-3 border-t border-border pt-2.5">
         {person.zeroActivity ? (
-          <p className="text-xs text-slate-400">
-            No logged activity yet, so this person earns 0% under merit until work is
-            recorded.
+          <p className="text-xs text-muted-foreground">
+            No logged activity yet, so this person earns 0% under merit until work is recorded.
           </p>
         ) : (
-          <EvidenceChips
-            person={person}
-            contributionsById={contributionsById}
-            onOpen={onOpenEvidence}
-          />
+          <EvidenceChips person={person} contributionsById={contributionsById} onOpen={onOpenEvidence} />
         )}
       </div>
 
       {person.hiddenContributor && (
-        <p className="mt-2 text-[11px] leading-relaxed text-amber-700">
-          {Math.round(person.quietValueSharePct)}% of their value comes from quiet work, and
-          merit beats their item-count share by{" "}
-          {(person.meritPct - person.activityCountSharePct).toFixed(1)} pts.
+        <p className="mt-2 text-[11px] leading-relaxed text-warning-foreground dark:text-warning">
+          {Math.round(person.quietValueSharePct)}% of their value comes from quiet work, and merit beats their item-count
+          share by {(person.meritPct - person.activityCountSharePct).toFixed(1)} pts.
         </p>
       )}
-    </article>
+    </motion.article>
   );
 }

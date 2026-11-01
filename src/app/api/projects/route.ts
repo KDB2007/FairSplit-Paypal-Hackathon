@@ -102,8 +102,12 @@ export async function POST(request: Request) {
   }
 }
 
-/** GET /api/projects — list projects (seeds the demo on first call). */
+/**
+ * GET /api/projects — list projects. The demo project is only seeded in demo
+ * mode; with DEMO_MODE=false the dashboard shows real projects (or an empty
+ * state) instead of a sample row.
+ */
 export async function GET() {
-  getOrCreateDemo();
+  if (process.env.DEMO_MODE === "true") getOrCreateDemo();
   return NextResponse.json({ projects: listProjects().map(summarise) });
 }

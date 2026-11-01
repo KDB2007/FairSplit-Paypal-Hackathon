@@ -130,7 +130,7 @@ export function SourcesPanel({
       <CardHeader className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <CardTitle>Sources</CardTitle>
-          <p className="mt-0.5 text-sm text-slate-500">
+          <p className="mt-0.5 text-sm text-muted-foreground">
             {summary.length ? `Connected: ${summary.join(" · ")}` : "Connect GitHub and Trello to sync real activity."}
             {project.lastSync && ` · last synced ${new Date(project.lastSync.at).toLocaleString()}`}
           </p>
@@ -185,16 +185,16 @@ export function SourcesPanel({
           </fieldset>
 
           {test && (
-            <ul className="space-y-1 rounded-lg border border-slate-200 px-3 py-2 text-sm">
+            <ul className="space-y-1 rounded-lg border border-border px-3 py-2 text-sm">
               {test.status.demoMode && (
-                <li className="text-amber-700">DEMO_MODE is on — Sync uses sample activity, not these sources.</li>
+                <li className="text-warning-foreground dark:text-warning">DEMO_MODE is on — Sync uses sample activity, not these sources.</li>
               )}
               {(["github", "trello"] as const).map((source) => {
                 const result = test[source];
                 const connected = Boolean(project.sources?.[source]);
                 const tokenConfigured = source === "github" ? test.status.githubToken : test.status.trello;
                 return (
-                  <li key={source} className={result && !result.ok ? "text-rose-700" : "text-slate-600"}>
+                  <li key={source} className={result && !result.ok ? "text-destructive" : "text-foreground/80"}>
                     <span className="font-medium">{SOURCE_LABEL[source]}:</span>{" "}
                     {!connected
                       ? "no source connected."
@@ -218,16 +218,16 @@ export function SourcesPanel({
           {people.length > 0 && (
             <div>
               <Label>Map people to members</Label>
-              <p className="mb-2 text-xs text-slate-500">
+              <p className="mb-2 text-xs text-muted-foreground">
                 Their synced work stays unassigned until mapped. Mapping re-attributes past items instantly.
               </p>
-              <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200">
+              <ul className="divide-y divide-border rounded-lg border border-border">
                 {people.map((person) => (
                   <li key={`${person.source}:${person.id}`} className="flex flex-wrap items-center gap-3 px-3 py-2">
                     <Badge tone={person.source === "github" ? "blue" : "emerald"}>{SOURCE_LABEL[person.source]}</Badge>
-                    <span className="min-w-0 flex-1 truncate text-sm font-medium text-slate-800">{person.label}</span>
+                    <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">{person.label}</span>
                     {person.count != null && (
-                      <span className="text-xs text-slate-500">
+                      <span className="text-xs text-muted-foreground">
                         {person.count} item{person.count === 1 ? "" : "s"}
                       </span>
                     )}
@@ -261,15 +261,15 @@ export function SourcesPanel({
                     .map((source) => (
                       <li
                         key={`${m.id}-${source}`}
-                        className="flex items-center gap-1.5 rounded-full border border-slate-200 py-0.5 pl-2.5 pr-1 text-xs text-slate-600"
+                        className="flex items-center gap-1.5 rounded-full border border-border py-0.5 pl-2.5 pr-1 text-xs text-foreground/80"
                       >
                         {m.name} ← {SOURCE_LABEL[source]}{" "}
-                        <span className="font-medium text-slate-800">
+                        <span className="font-medium text-foreground">
                           {source === "github" ? m.githubLogin : `@${m.trelloUsername ?? m.trelloMemberId}`}
                         </span>
                         <button
                           type="button"
-                          className="rounded-full px-1.5 text-slate-400 hover:bg-slate-100 hover:text-rose-600"
+                          className="rounded-full px-1.5 text-muted-foreground hover:bg-muted hover:text-destructive"
                           onClick={() => onUnmap(m.id, source)}
                           disabled={locked || busy !== null}
                           aria-label={`Unmap ${m.name} from ${SOURCE_LABEL[source]}`}

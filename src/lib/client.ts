@@ -21,6 +21,17 @@ export async function fetchProject(id: string): Promise<Project> {
   return json<Project>(res);
 }
 
+/** Remove a project from the in-memory store. The demo project is protected. */
+export async function deleteProject(id: string): Promise<void> {
+  const res = await fetch(`/api/projects/${id}`, { method: "DELETE" });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(
+      (data as { error?: string }).error || `Request failed (${res.status})`
+    );
+  }
+}
+
 export async function createProject(input: {
   name: string;
   totalAmount: number;

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { confirmCharter, getProject } from "@/lib/store";
+import { DEMO_PROJECT_ID, confirmCharter, deleteProject, getProject } from "@/lib/store";
 
 export const dynamic = "force-dynamic";
 
@@ -15,6 +15,21 @@ export async function GET(_request: Request, { params }: RouteContext) {
     return NextResponse.json({ error: "Project not found." }, { status: 404 });
   }
   return NextResponse.json(project);
+}
+
+/** DELETE /api/projects/[id] — remove a project. The demo project is protected. */
+export async function DELETE(_request: Request, { params }: RouteContext) {
+  const { id } = await params;
+  if (id === DEMO_PROJECT_ID) {
+    return NextResponse.json(
+      { error: "The demo project can't be deleted." },
+      { status: 400 }
+    );
+  }
+  if (!deleteProject(id)) {
+    return NextResponse.json({ error: "Project not found." }, { status: 404 });
+  }
+  return new NextResponse(null, { status: 204 });
 }
 
 /** PATCH /api/projects/[id] — confirm the charter. */

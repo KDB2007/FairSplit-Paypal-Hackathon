@@ -176,6 +176,12 @@ export interface ProjectSummary {
   philosophy: SplitPhilosophy;
   memberCount: number;
   createdAt: string;
+  /** Member names, in member order (which drives each person's colour). */
+  members: string[];
+  /** Cents per person under the current split (decisions, else AI proposal); null before scoring. */
+  split: Array<{ person: string; cents: number }> | null;
+  /** Total actually paid out, in cents. */
+  paidCents: number;
 }
 
 export interface ScoreResult {
