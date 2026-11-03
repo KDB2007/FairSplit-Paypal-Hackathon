@@ -13,7 +13,7 @@ import type {
 import { ApiError, scoreProject } from "@/lib/client";
 import { contributionsInWindow } from "@/lib/contribution-window";
 import { recomputeWithAssignments } from "@/lib/explain/recompute";
-import { cn, money } from "@/lib/utils";
+import { cn, money, uniqueLines } from "@/lib/utils";
 import {
   Avatar,
   Badge,
@@ -283,6 +283,10 @@ export function ExplainableSplit({
   /* -------------------------------- Error --------------------------------- */
 
   if (phase === "error" || !liveSplit) {
+    // Several parallel runs can fail with the same underlying message; show
+    // each distinct cause once instead of repeating it per run.
+    const details = uniqueLines(scoreDetails);
+    const shownDetails = details.slice(0, 4);
     return (
       <Card>
         <CardContent className="space-y-4 py-12">
@@ -292,11 +296,17 @@ export function ExplainableSplit({
             <p className="mt-1 text-sm text-foreground/80">
               {scoreError ?? "The scoring model did not return a usable response."}
             </p>
-            {scoreDetails.length > 0 && (
+            {details.length > 0 && (
               <ul className="mt-2 space-y-0.5 text-xs text-muted-foreground">
-                {scoreDetails.slice(0, 3).map((detail, index) => (
-                  <li key={index}>{detail}</li>
+                {shownDetails.map((detail) => (
+                  <li key={detail}>{detail}</li>
                 ))}
+                {details.length > shownDetails.length && (
+                  <li className="opacity-70">
+                    +{details.length - shownDetails.length} more distinct error
+                    {details.length - shownDetails.length === 1 ? "" : "s"}
+                  </li>
+                )}
               </ul>
             )}
           </div>

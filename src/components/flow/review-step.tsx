@@ -143,6 +143,21 @@ export function ReviewStep({
           <TotalRing total={total} />
         </CardHeader>
         <CardContent className="space-y-3">
+          {project.scoredSplit && project.scoredSplit.formula.notes.length > 0 && (
+            <div className="rounded-lg border border-border/70 bg-muted/30 px-4 py-3">
+              <p className="text-xs font-medium text-foreground/80">Scoring notes</p>
+              <ul className="mt-1 space-y-0.5 text-xs leading-relaxed text-muted-foreground">
+                {project.scoredSplit.formula.notes.map((note) => (
+                  <li key={note} className="flex gap-1.5">
+                    <span className="text-muted-foreground/60" aria-hidden>
+                      ·
+                    </span>
+                    {note}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
           {decisions.map((d, index) => {
             const proposal = project.proposals.find((p) => p.person === d.person);
             const cents = allocations[index];

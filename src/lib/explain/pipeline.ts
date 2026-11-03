@@ -105,9 +105,13 @@ export async function scoreProjectExplainable(project: Project): Promise<ScoredS
       .filter((result): result is PromiseFulfilledResult<ContributionJudgment[]> => result.status === "fulfilled")
       .map((result) => result.value);
     if (fulfilled.length === 0) {
-      const reasons = results
-        .filter((result): result is PromiseRejectedResult => result.status === "rejected")
-        .map((result) => String(result.reason?.message ?? result.reason));
+      const reasons = Array.from(
+        new Set(
+          results
+            .filter((result): result is PromiseRejectedResult => result.status === "rejected")
+            .map((result) => String(result.reason?.message ?? result.reason))
+        )
+      );
       throw new ScoreError(
         "MODEL_FAILED",
         "The scoring model did not return a valid response. Try again.",

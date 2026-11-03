@@ -50,6 +50,22 @@ export function timeAgo(iso: string, now: number = Date.now()): string {
   return formatDate(iso);
 }
 
+/**
+ * Trim, drop blanks and collapse exact duplicates, keeping first-seen order.
+ * Error details from several parallel judge runs can repeat verbatim.
+ */
+export function uniqueLines(lines: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed || seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    out.push(trimmed);
+  }
+  return out;
+}
+
 export function initials(name: string): string {
   return name
     .split(/\s+/)

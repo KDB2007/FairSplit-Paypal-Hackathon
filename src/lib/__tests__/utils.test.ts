@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { timeAgo } from "../utils";
+import { timeAgo, uniqueLines } from "../utils";
 
 const NOW = Date.parse("2026-11-02T12:00:00.000Z");
 
@@ -27,5 +27,18 @@ describe("timeAgo", () => {
 
   it("returns an empty string for an unparseable date", () => {
     expect(timeAgo("not-a-date", NOW)).toBe("");
+  });
+});
+
+describe("uniqueLines", () => {
+  it("drops blanks and exact duplicates while preserving order", () => {
+    expect(uniqueLines(["first", " first ", "", "second", "first"])).toEqual(["first", "second"]);
+  });
+
+  it("keeps genuinely different lines that share a prefix", () => {
+    expect(uniqueLines(["run 1: timeout", "run 2: timeout"])).toEqual([
+      "run 1: timeout",
+      "run 2: timeout",
+    ]);
   });
 });
