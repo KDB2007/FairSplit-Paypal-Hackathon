@@ -1,11 +1,28 @@
 import type { PoolConfig, Project, ProjectSummary, ScoredSplit, SyncReport } from "./types";
 
+/**
+ * An API error with the server's machine-readable code and the underlying
+ * reasons. Keeps the real cause (timeout, quota, invalid output) available to
+ * the UI instead of collapsing everything into one generic sentence.
+ */
+export class ApiError extends Error {
+  code?: string;
+  details: string[];
+
+  constructor(message: string, code?: string, details: string[] = []) {
+    super(message);
+    this.name = "ApiError";
+    this.code = code;
+    this.details = details;
+  }
+}
+
 async function json<T>(res: Response): Promise<T> {
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    const message =
-      (data as { error?: string }).error || `Request failed (${res.status})`;
-    throw new Error(message);
+    const payload = data as { error?: string; code?: string; details?: unknown };
+    const details = Array.isArray(payload.details) ? payload.details.map(String) : [];
+    throw new ApiError(payload.error || `Request failed (${res.status})`, payload.code, details);
   }
   return data as T;
 }

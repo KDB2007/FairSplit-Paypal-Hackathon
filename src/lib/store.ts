@@ -75,6 +75,8 @@ export function summarise(project: Project): ProjectSummary {
     members: project.members.map((m) => m.name),
     split: summarySplit(project),
     paidCents: project.payouts.reduce((sum, p) => sum + Math.round(p.amount * 100), 0),
+    hasSources: Boolean(project.sources?.github?.repos.length || project.sources?.trello?.boardId),
+    lastSyncAt: project.lastSync?.at ?? null,
   };
 }
 

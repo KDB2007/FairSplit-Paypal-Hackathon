@@ -21,6 +21,11 @@ export interface ConfidenceResult {
  * If any person moves more than 5 percentage points between the best and worst
  * run we surface `lower` plus the min/max range, so the lead can see exactly
  * which share is soft. Otherwise `high` and no range is attached.
+ *
+ * With fewer than 2 usable runs there's nothing to compare — every "delta" is
+ * trivially 0 because there's only one reading per person, not agreement
+ * between independent reads. That's "untested", not "high confidence", so a
+ * single run (a chunk failure can leave exactly one) is always `lower`.
  */
 export function assessConfidence(runs: ConfidenceInput[][]): ConfidenceResult {
   const usable = runs.filter((run) => run.length > 0);
@@ -46,7 +51,7 @@ export function assessConfidence(runs: ConfidenceInput[][]): ConfidenceResult {
     };
   }
 
-  const confidence: Confidence = maxDelta > CONFIDENCE_THRESHOLD_PTS ? "lower" : "high";
+  const confidence: Confidence = usable.length < 2 || maxDelta > CONFIDENCE_THRESHOLD_PTS ? "lower" : "high";
   return {
     confidence,
     // Ranges are only meaningful when we actually flag the split as soft.

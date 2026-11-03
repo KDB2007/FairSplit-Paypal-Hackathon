@@ -95,6 +95,7 @@ export async function POST(request: Request) {
     });
   } catch (error) {
     if (error instanceof ScoreError) {
+      console.warn(`Scoring ${error.code}:`, error.details.join(" | ") || error.message);
       const status = error.code === "NO_MEMBERS" ? 400 : 502;
       return NextResponse.json(
         { error: error.message, code: error.code, details: error.details },

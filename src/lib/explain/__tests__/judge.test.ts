@@ -83,6 +83,15 @@ describe("parseJudgments", () => {
     expect(parseJudgments(badCategory, IDS).ok).toBe(false);
   });
 
+  it("maps contribution types reused as categories onto real categories", () => {
+    const payload = structuredClone(validPayload);
+    (payload.contributions[0] as { category: string }).category = "pr";
+    (payload.contributions[1] as { category: string }).category = "Code Review";
+    const result = parseJudgments(payload, IDS);
+    expect(result.ok).toBe(true);
+    expect(result.judgments.map((j) => j.category)).toEqual(["code", "review", "client_comms"]);
+  });
+
   it("rejects duplicate ids", () => {
     const payload = {
       contributions: [...validPayload.contributions, validPayload.contributions[0]],

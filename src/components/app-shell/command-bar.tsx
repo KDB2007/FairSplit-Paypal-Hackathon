@@ -5,7 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
 import { FolderKanban, LayoutDashboard, ListChecks, Moon, Plus, ReceiptText, Sparkles, Sun } from "lucide-react";
 import ActionSearchBar, { type CommandItem } from "@/components/kokonutui/action-search-bar";
-import { projectHref } from "@/lib/project-links";
+import { DEMO_PROJECT_ID, projectHref } from "@/lib/project-links";
 import { currentProjectId, useProjects } from "./use-projects";
 
 /** ⌘K palette: jump to any project or page, and switch theme. */
@@ -37,11 +37,11 @@ export function CommandBar({ className }: { className?: string }) {
         { id: "cur-receipt", label: `${name}: receipt`, group: "This project", icon: <ReceiptText />, href: `/receipt/${activeId}` }
       );
     }
-    const demo = projects?.find((p) => p.id === "demo");
+    const demo = projects?.find((p) => p.id === DEMO_PROJECT_ID);
     list.push(
       { id: "projects", label: "Dashboard", group: "Go to", icon: <LayoutDashboard />, href: "/projects" },
       { id: "new", label: "New project", group: "Go to", icon: <Plus />, href: "/projects/new", keywords: ["create", "charter"] },
-      { id: "demo", label: "Demo project", group: "Go to", icon: <Sparkles />, href: demo ? projectHref(demo) : "/project/demo" }
+      { id: "demo", label: "Demo project", group: "Go to", icon: <Sparkles />, href: demo ? projectHref(demo) : `/project/${DEMO_PROJECT_ID}` }
     );
     if (projects && projects.length > 0) {
       list.push({

@@ -2,12 +2,12 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { ArrowRight, MoreHorizontal } from "lucide-react";
+import { ArrowRight, MoreHorizontal, Trash2 } from "lucide-react";
 import { motion, useReducedMotion } from "motion/react";
 import type { ProjectStatus, ProjectSummary } from "@/lib/types";
 import { deleteProject } from "@/lib/client";
-import { projectHref } from "@/lib/project-links";
-import { cn, formatDate, money } from "@/lib/utils";
+import { isDemoProject, projectHref } from "@/lib/project-links";
+import { cn, formatDate, money, timeAgo } from "@/lib/utils";
 import { personColor } from "@/lib/person-color";
 import { Avatar } from "@/components/ui";
 import {
@@ -57,12 +57,20 @@ export function ProjectRows({
   stage,
   onStageChange,
   onDeleted,
+  emptyLabel,
 }: {
   projects: ProjectSummary[];
   stage: ProjectStatus | null;
   onStageChange: (stage: ProjectStatus | null) => void;
   onDeleted: () => void;
+  /** Overrides the "no projects at this stage" message, e.g. for a search with no matches. */
+  emptyLabel?: string;
 }) {
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [bulkError, setBulkError] = useState<string | null>(null);
+
   const filtered = stage
     ? projects.filter((project) => project.status === stage)
     : projects;
@@ -72,28 +80,86 @@ export function ProjectRows({
     projects: filtered.filter((project) => group.statuses.includes(project.status)),
   })).filter((group) => group.projects.length > 0);
 
+  // Selections can point at rows a filter has since hidden; only act on what's visible.
+  const visibleIds = new Set(filtered.map((project) => project.id));
+  const selectedVisible = Array.from(selected).filter((id) => visibleIds.has(id));
+
+  function toggleSelected(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  async function onConfirmBulkDelete() {
+    setBulkDeleting(true);
+    setBulkError(null);
+    const failures: string[] = [];
+    for (const id of selectedVisible) {
+      try {
+        await deleteProject(id);
+      } catch {
+        failures.push(id);
+      }
+    }
+    setBulkDeleting(false);
+    if (failures.length > 0) {
+      setSelected(new Set(failures));
+      setBulkError(`${failures.length} project${failures.length === 1 ? "" : "s"} could not be deleted.`);
+      onDeleted();
+      return;
+    }
+    setSelected(new Set());
+    setBulkOpen(false);
+    onDeleted();
+  }
+
   return (
     <section className="mt-12">
       <div className="flex items-center justify-between gap-4">
         <p className="text-xs text-muted-foreground">
-          {stage
-            ? `Showing ${STATUS_LABEL[stage].toLowerCase()}`
-            : `${projects.length} project${projects.length === 1 ? "" : "s"}`}
+          {selectedVisible.length > 0
+            ? `${selectedVisible.length} selected`
+            : stage
+              ? `Showing ${STATUS_LABEL[stage].toLowerCase()}`
+              : `${projects.length} project${projects.length === 1 ? "" : "s"}`}
         </p>
-        {stage && (
-          <button
-            type="button"
-            onClick={() => onStageChange(null)}
-            className="text-xs text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            Clear filter
-          </button>
-        )}
+        <div className="flex items-center gap-3">
+          {selectedVisible.length > 0 && (
+            <>
+              <button
+                type="button"
+                onClick={() => setBulkOpen(true)}
+                className="inline-flex items-center gap-1 text-xs text-destructive transition-colors hover:text-destructive/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <Trash2 className="size-3" /> Delete
+              </button>
+              <button
+                type="button"
+                onClick={() => setSelected(new Set())}
+                className="text-xs text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                Clear selection
+              </button>
+            </>
+          )}
+          {stage && (
+            <button
+              type="button"
+              onClick={() => onStageChange(null)}
+              className="text-xs text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              Clear filter
+            </button>
+          )}
+        </div>
       </div>
 
       {groups.length === 0 ? (
         <p className="py-10 text-sm text-muted-foreground">
-          No projects at this stage.
+          {emptyLabel ?? "No projects at this stage."}
         </p>
       ) : (
         groups.map((group) => (
@@ -113,12 +179,34 @@ export function ProjectRows({
                   project={project}
                   index={index}
                   onDeleted={onDeleted}
+                  selected={selected.has(project.id)}
+                  onToggleSelected={() => toggleSelected(project.id)}
                 />
               ))}
             </ul>
           </div>
         ))
       )}
+
+      <AlertDialog open={bulkOpen} onOpenChange={setBulkOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Delete {selectedVisible.length} project{selectedVisible.length === 1 ? "" : "s"}?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              This removes them from the in-memory store. It can’t be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {bulkError && <p className="text-sm text-destructive">{bulkError}</p>}
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={bulkDeleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" disabled={bulkDeleting} onClick={onConfirmBulkDelete}>
+              {bulkDeleting ? "Deleting…" : "Delete"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </section>
   );
 }
@@ -127,10 +215,14 @@ function ProjectRow({
   project,
   index,
   onDeleted,
+  selected,
+  onToggleSelected,
 }: {
   project: ProjectSummary;
   index: number;
   onDeleted: () => void;
+  selected: boolean;
+  onToggleSelected: () => void;
 }) {
   const reduce = useReducedMotion();
   const [open, setOpen] = useState(false);
@@ -139,7 +231,7 @@ function ProjectRow({
   const splitTotal =
     project.split?.reduce((sum, item) => sum + item.cents, 0) ?? 0;
   // The demo project is seeded on demand, so deleting it would only bring it back.
-  const deletable = project.id !== "demo";
+  const deletable = !isDemoProject(project.id);
 
   async function onConfirmDelete() {
     setDeleting(true);
@@ -173,10 +265,28 @@ function ProjectRow({
       />
 
       <div className="pointer-events-none relative z-10 -mx-3 flex items-center gap-4 rounded-lg px-3 py-4 transition-colors group-hover:bg-muted/30 sm:gap-6">
+        {deletable && (
+          <input
+            type="checkbox"
+            checked={selected}
+            onChange={onToggleSelected}
+            aria-label={`Select ${project.name}`}
+            className={cn(
+              "pointer-events-auto size-4 shrink-0 cursor-pointer rounded border-input accent-primary transition-opacity",
+              !selected && "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
+            )}
+          />
+        )}
         <div className="min-w-0 flex-1">
           <p className="truncate text-[15px] font-medium">{project.name}</p>
           <p className="mt-0.5 text-xs tabular-nums text-muted-foreground">
             {money(project.totalAmount)} · {formatDate(project.createdAt)}
+            {project.hasSources && (
+              <span className={project.lastSyncAt ? undefined : "text-warning"}>
+                {" "}
+                · {project.lastSyncAt ? `Synced ${timeAgo(project.lastSyncAt)}` : "Not synced yet"}
+              </span>
+            )}
           </p>
           {project.split && splitTotal > 0 && (
             <div

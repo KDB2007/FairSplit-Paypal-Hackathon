@@ -24,6 +24,64 @@ export const CATEGORIES: ContributionCategory[] = [
 
 export const MAX_RATIONALE_WORDS = 20;
 
+/**
+ * Labels the model reaches for that mean one of our categories. It often
+ * reuses the contribution `type` (`pr`, `commit`) as a category; those are
+ * implementation work, so they map to `code` rather than failing the run.
+ */
+const CATEGORY_SYNONYMS: Record<string, ContributionCategory> = {
+  pr: "code",
+  pull_request: "code",
+  pullrequest: "code",
+  merge: "code",
+  commit: "code",
+  code_change: "code",
+  implementation: "code",
+  feature: "code",
+  bugfix: "code",
+  bug_fix: "code",
+  test: "code",
+  testing: "code",
+  qa: "code",
+  docs: "code",
+  documentation: "code",
+  refactor: "code",
+  code_review: "review",
+  review_comment: "review",
+  feedback: "review",
+  critique: "review",
+  ux: "design",
+  ui: "design",
+  mockup: "design",
+  wireframe: "design",
+  client: "client_comms",
+  client_communication: "client_comms",
+  communication: "client_comms",
+  comms: "client_comms",
+  stakeholder: "client_comms",
+  unblock: "unblocking",
+  support: "unblocking",
+  ops: "admin",
+  setup: "admin",
+  tooling: "admin",
+  planning: "planning",
+  plan: "planning",
+  roadmap: "planning",
+  research: "planning",
+};
+
+/**
+ * Map model output to a known category. Values outside the list (including
+ * free-form labels) are rejected rather than guessed.
+ */
+export function normalizeCategory(value: unknown): ContributionCategory | null {
+  if (typeof value !== "string") return null;
+  const key = value.trim().toLowerCase().replace(/[\s-]+/g, "_");
+  if (!key) return null;
+  if ((CATEGORIES as string[]).includes(key)) return key as ContributionCategory;
+  return CATEGORY_SYNONYMS[key] ?? null;
+}
+
 export interface ParseResult {
   ok: boolean;
   judgments: ContributionJudgment[];
@@ -91,8 +149,8 @@ export function parseJudgments(payload: unknown, expectedIds: string[]): ParseRe
       return;
     }
 
-    const category = item.category as ContributionCategory;
-    if (!CATEGORIES.includes(category)) {
+    const category = normalizeCategory(item.category);
+    if (!category) {
       errors.push(`item ${index} (${id}): invalid category ${String(item.category)}`);
       return;
     }

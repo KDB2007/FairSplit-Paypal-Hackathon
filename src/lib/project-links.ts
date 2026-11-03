@@ -10,3 +10,11 @@ import type { ProjectStatus } from "./types";
 export function projectHref(project: { id: string; status: ProjectStatus }): string {
   return project.status === "paid" ? `/receipt/${project.id}` : `/project/${project.id}`;
 }
+
+/** The ID of the seeded demo project — it's reset, not deleted, and always re-appears. */
+export const DEMO_PROJECT_ID = "demo";
+
+/** Whether a project is the seeded demo rather than one the user created. */
+export function isDemoProject(id: string): boolean {
+  return id === DEMO_PROJECT_ID;
+}

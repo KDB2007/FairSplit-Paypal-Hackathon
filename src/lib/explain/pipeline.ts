@@ -14,8 +14,10 @@ import { CANNED_REASONS, cannedJudgmentsForRun, generatedReason } from "./canned
 import { applyJudgments, buildScoredContributions, medianJudgments, topEvidenceIds } from "./judge";
 import { normalizeContributions } from "./normalize";
 import { explainOnce, judgeWithRetry, type ExplainPersonInput } from "./llm";
+import { judgeRunCount } from "./limits";
 import { toCents } from "./rounding";
 import { layerAmounts } from "../layers";
+import { contributionsInWindow } from "../contribution-window";
 
 /**
  * Server orchestrator: normalize → judge ×3 → compute → explain → confidence.
@@ -56,10 +58,19 @@ export async function scoreProjectExplainable(project: Project): Promise<ScoredS
     throw new ScoreError("NO_MEMBERS", "Add at least one member before scoring.");
   }
 
-  const normalized = normalizeContributions(project.contributions, project.members);
+  const scoped = contributionsInWindow(project);
+  const normalized = normalizeContributions(scoped, project.members);
   const items = normalized.contributions;
   const demo = isDemoMode();
   const notes: string[] = [];
+
+  const excluded = project.contributions.length - scoped.length;
+  const since = project.sources?.github?.since;
+  if (excluded > 0 && since) {
+    notes.push(
+      `${excluded} GitHub item${excluded === 1 ? "" : "s"} before ${since.slice(0, 10)} excluded by the date window.`
+    );
+  }
 
   if (normalized.dropped.length > 0) {
     const merges = normalized.dropped.filter((d) => d.reason === "merge_commit").length;
@@ -74,17 +85,22 @@ export async function scoreProjectExplainable(project: Project): Promise<ScoredS
     );
   }
 
-  // ---- Step 1: judge three times, in parallel -----------------------------
+  // ---- Step 1: judge independent runs, in parallel ------------------------
   let runs: ContributionJudgment[][];
   if (demo) {
     runs = [0, 1, 2].map((index) => cannedJudgmentsForRun(items, index));
     notes.push("DEMO_MODE: canned judgments replayed through the real formula.");
   } else {
-    const results = await Promise.allSettled([
-      judgeWithRetry(items),
-      judgeWithRetry(items),
-      judgeWithRetry(items),
-    ]);
+    // Three independent reads give confidence more to work with, but a very
+    // large project would spend the whole request budget on judging. Two reads
+    // keep the call time bounded; confidence uses the runs we got.
+    const runCount = judgeRunCount(items.length);
+    if (runCount < 3) {
+      notes.push("Large project: 2 independent reads used to keep scoring responsive.");
+    }
+    const results = await Promise.allSettled(
+      Array.from({ length: runCount }, () => judgeWithRetry(items))
+    );
     const fulfilled = results
       .filter((result): result is PromiseFulfilledResult<ContributionJudgment[]> => result.status === "fulfilled")
       .map((result) => result.value);
@@ -99,8 +115,8 @@ export async function scoreProjectExplainable(project: Project): Promise<ScoredS
       );
     }
     runs = fulfilled;
-    if (fulfilled.length < 3) {
-      notes.push(`Only ${fulfilled.length} of 3 model runs succeeded; confidence uses the runs we got.`);
+    if (fulfilled.length < runCount) {
+      notes.push(`Only ${fulfilled.length} of ${runCount} model runs succeeded; confidence uses the runs we got.`);
     }
   }
 

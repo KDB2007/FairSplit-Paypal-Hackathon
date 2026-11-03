@@ -11,7 +11,45 @@ import { parseJudgments, validateEvidenceIds } from "./judge";
  * ./judge before it can influence a number.
  */
 
-export const LLM_TIMEOUT_MS = 15_000;
+export const LLM_TIMEOUT_MS = 25_000;
+
+/**
+ * A single judge call covers at most this many items. Large projects are split
+ * into several bounded calls so no request can sit on the timeout — 20 items
+ * already takes ~16s on a fast model, and 100+ items will never fit in one.
+ */
+export const JUDGE_CHUNK_SIZE = 15;
+
+/** Chunks run a few at a time so we don't open dozens of sockets at once. */
+const JUDGE_CONCURRENCY = 3;
+
+/**
+ * OpenRouter reserves credit per in-flight request. Keep the global number of
+ * judge requests low so several runs can't exhaust the balance at once.
+ */
+const MAX_IN_FLIGHT = 5;
+let inFlight = 0;
+const waiting: Array<() => void> = [];
+
+async function withSlot<T>(run: () => Promise<T>): Promise<T> {
+  if (inFlight >= MAX_IN_FLIGHT) {
+    // Visible if MAX_IN_FLIGHT turns out to be too low in practice — otherwise
+    // queuing is silent and there's no signal to tune it from.
+    console.warn(`Judge requests: ${waiting.length + 1} queued behind ${MAX_IN_FLIGHT} in flight`);
+    await new Promise<void>((resolve) => waiting.push(resolve));
+  }
+  inFlight += 1;
+  try {
+    return await run();
+  } finally {
+    inFlight -= 1;
+    waiting.shift()?.();
+  }
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 export const STEP1_SYSTEM = `You evaluate individual work contributions on a small team project. Judge ONLY
 what is in the data; never infer unrecorded work. Reviewing, unblocking
@@ -36,7 +74,9 @@ Return ONLY a JSON object with this exact shape — no other keys, no prose:
     }
   ]
 }
-Include exactly one object per input contribution id, covering every id given, in any order.`;
+Include exactly one object per input contribution id, covering every id given, in any order.
+The input has a "type" field (pr, commit, review, trello, manual) — it is not a category.
+Pick the category from the list above; do not copy the type into it.`;
 
 export const STEP3_SYSTEM = `You explain a split of a fixed project payment to the team that did the work.
 You are given each person's already-computed percentages and their strongest
@@ -91,50 +131,123 @@ function describeItems(items: NormalizedContribution[]) {
   }));
 }
 
-/** One Step 1 attempt. Throws on transport error, invalid JSON or bad shape. */
-export async function judgeOnce(items: NormalizedContribution[]): Promise<ContributionJudgment[]> {
-  const openai = client();
-  const response = await openai.chat.completions.create({
-    model: model(),
-    temperature: 0.2,
-    response_format: { type: "json_object" },
-    messages: [
-      { role: "system", content: STEP1_SYSTEM },
-      {
-        role: "user",
-        content: JSON.stringify({ contributions: describeItems(items) }),
-      },
-    ],
+/** One bounded Step 1 request. Throws on transport error, invalid JSON or bad shape. */
+async function judgeChunkOnce(items: NormalizedContribution[]): Promise<ContributionJudgment[]> {
+  return withSlot(async () => {
+    const openai = client();
+    const response = await openai.chat.completions.create({
+      model: model(),
+      temperature: 0.2,
+      response_format: { type: "json_object" },
+      messages: [
+        { role: "system", content: STEP1_SYSTEM },
+        {
+          role: "user",
+          content: JSON.stringify({ contributions: describeItems(items) }),
+        },
+      ],
+    });
+
+    const raw = response.choices[0]?.message?.content ?? "";
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      throw new Error("Step 1 returned invalid JSON");
+    }
+
+    const result = parseJudgments(parsed, items.map((item) => item.id));
+    if (!result.ok) {
+      throw new Error(`Step 1 output rejected: ${result.errors.slice(0, 3).join("; ")}`);
+    }
+    return result.judgments;
   });
-
-  const raw = response.choices[0]?.message?.content ?? "";
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    throw new Error("Step 1 returned invalid JSON");
-  }
-
-  const result = parseJudgments(parsed, items.map((item) => item.id));
-  if (!result.ok) {
-    throw new Error(`Step 1 output rejected: ${result.errors.slice(0, 3).join("; ")}`);
-  }
-  return result.judgments;
 }
 
-/** Retry once, then surface the error so the UI can offer a manual retry. */
-export async function judgeWithRetry(items: NormalizedContribution[]): Promise<ContributionJudgment[]> {
+export function chunkItems<T>(items: T[], size = JUDGE_CHUNK_SIZE): T[][] {
+  const chunks: T[][] = [];
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size));
+  }
+  return chunks;
+}
+
+export type Settled<R> = { ok: true; value: R } | { ok: false; error: unknown };
+
+/**
+ * Run a bounded number of promises at a time, preserving input order. Each
+ * task's outcome is captured rather than thrown: one failing task used to
+ * reject the whole `Promise.all`, which (via judgeOnce below) discarded every
+ * other chunk's already-judged items along with it.
+ */
+export async function mapWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  run: (item: T) => Promise<R>
+): Promise<Settled<R>[]> {
+  const results = new Array<Settled<R>>(items.length);
+  let next = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (next < items.length) {
+      const index = next++;
+      try {
+        results[index] = { ok: true, value: await run(items[index]) };
+      } catch (error) {
+        results[index] = { ok: false, error };
+      }
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
+
+/** Retry a chunk once, then surface the error so the UI can offer a manual retry. */
+async function judgeChunkWithRetry(items: NormalizedContribution[]): Promise<ContributionJudgment[]> {
   try {
-    return await judgeOnce(items);
+    return await judgeChunkOnce(items);
   } catch (firstError) {
+    // Give in-flight requests time to settle (OpenRouter reserves credit per
+    // request) and ride out a transient timeout instead of hammering it.
+    await sleep(800 + Math.random() * 900);
     try {
-      return await judgeOnce(items);
+      return await judgeChunkOnce(items);
     } catch (secondError) {
       throw new Error(
         `Judging failed twice. ${(secondError as Error).message || (firstError as Error).message}`
       );
     }
   }
+}
+
+/**
+ * One Step 1 run: bounded chunks, a few in flight, each retried once.
+ *
+ * A chunk that still fails after its retry doesn't sink the whole run — the
+ * other chunks' judgments (most of a large project) are kept, and medianJudgments
+ * already tolerates a run that's missing some ids. The run only throws if every
+ * chunk failed, so the caller sees a real, total failure rather than losing
+ * otherwise-good work to one flaky request.
+ */
+export async function judgeOnce(items: NormalizedContribution[]): Promise<ContributionJudgment[]> {
+  const chunks = chunkItems(items);
+  if (chunks.length === 0) return [];
+  const results = await mapWithConcurrency(chunks, JUDGE_CONCURRENCY, judgeChunkWithRetry);
+  const judged = results.filter((r): r is { ok: true; value: ContributionJudgment[] } => r.ok);
+  const failed = results.length - judged.length;
+
+  if (judged.length === 0) {
+    const firstError = results.find((r): r is { ok: false; error: unknown } => !r.ok)?.error;
+    throw firstError instanceof Error ? firstError : new Error(String(firstError));
+  }
+  if (failed > 0) {
+    console.warn(`Judging: ${failed} of ${results.length} chunks failed; using judgments from the rest.`);
+  }
+  return judged.flatMap((r) => r.value);
+}
+
+/** Alias kept for the pipeline: retries now happen per chunk. */
+export async function judgeWithRetry(items: NormalizedContribution[]): Promise<ContributionJudgment[]> {
+  return judgeOnce(items);
 }
 
 export interface ExplainPersonInput {

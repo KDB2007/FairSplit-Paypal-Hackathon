@@ -10,7 +10,8 @@ import type {
   ScoredPerson,
   ScoredSplit,
 } from "@/lib/types";
-import { scoreProject } from "@/lib/client";
+import { ApiError, scoreProject } from "@/lib/client";
+import { contributionsInWindow } from "@/lib/contribution-window";
 import { recomputeWithAssignments } from "@/lib/explain/recompute";
 import { cn, money } from "@/lib/utils";
 import {
@@ -74,6 +75,7 @@ export function ExplainableSplit({
   const [phase, setPhase] = useState<Phase>(split ? "done" : "idle");
   const [mode, setMode] = useState<ScoreMode>(split?.defaultMode ?? "merit");
   const [scoreError, setScoreError] = useState<string | null>(null);
+  const [scoreDetails, setScoreDetails] = useState<string[]>([]);
   const [scoreDone, setScoreDone] = useState(false);
   const reduce = useReducedMotion();
   const { track } = useTasks();
@@ -104,12 +106,13 @@ export function ExplainableSplit({
 
   async function runScore() {
     setScoreError(null);
+    setScoreDetails([]);
     setScoreDone(false);
     setPhase("scoring");
     const startedAt = Date.now();
 
     try {
-      const result = await track("AI scoring", scoreProject(project.id), `${project.contributions.length} activities`);
+      const result = await track("AI scoring", scoreProject(project.id), `${contributionsInWindow(project).length} activities`);
       const elapsed = Date.now() - startedAt;
       // Let the pipeline read before the reveal, without inventing extra work.
       if (!reduce && elapsed < MIN_SCORING_MS) await sleep(MIN_SCORING_MS - elapsed);
@@ -125,6 +128,7 @@ export function ExplainableSplit({
       setPhase("done");
     } catch (error) {
       setScoreError(error instanceof Error ? error.message : "Scoring failed.");
+      setScoreDetails(error instanceof ApiError ? error.details : []);
       setPhase("error");
     }
   }
@@ -288,6 +292,13 @@ export function ExplainableSplit({
             <p className="mt-1 text-sm text-foreground/80">
               {scoreError ?? "The scoring model did not return a usable response."}
             </p>
+            {scoreDetails.length > 0 && (
+              <ul className="mt-2 space-y-0.5 text-xs text-muted-foreground">
+                {scoreDetails.slice(0, 3).map((detail, index) => (
+                  <li key={index}>{detail}</li>
+                ))}
+              </ul>
+            )}
           </div>
           <p className="text-xs text-muted-foreground">
             Your contributions are untouched. Retry, or go back and check the activity list.

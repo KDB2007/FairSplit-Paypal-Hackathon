@@ -2,7 +2,9 @@
 
 import { useEffect, useMemo, useState } from "react";
 import type { Project } from "@/lib/types";
+import { contributionsInWindow } from "@/lib/contribution-window";
 import { normalizeContributions } from "@/lib/explain/normalize";
+import { judgeRunCount } from "@/lib/explain/limits";
 import AILoadingState, { type AgentStep } from "@/components/kokonutui/ai-loading";
 
 /**
@@ -25,17 +27,24 @@ export function ScoringProgress({
   failed: boolean;
 }) {
   const plan = useMemo(() => {
-    const normalized = normalizeContributions(project.contributions, project.members);
+    const scoped = contributionsInWindow(project);
+    const normalized = normalizeContributions(scoped, project.members);
     const items = normalized.contributions.length;
     const merges = normalized.dropped.filter((d) => d.reason === "merge_commit").length;
     const trivial = normalized.dropped.filter((d) => d.reason === "trivial_change").length;
-    const folded = project.contributions.length - items - normalized.dropped.length;
+    const folded = scoped.length - items - normalized.dropped.length;
+    const excluded = project.contributions.length - scoped.length;
+    const runs = judgeRunCount(items);
     return [
       {
         id: "read",
-        label: `Reading ${project.contributions.length} activities`,
+        label: `Reading ${scoped.length} activities`,
         detail: [
-          folded > 0 ? `${folded} commits folded into their pull requests` : "matching items to members",
+          excluded > 0
+            ? `${excluded} older than the GitHub date skipped`
+            : folded > 0
+              ? `${folded} commits folded into their pull requests`
+              : "matching items to members",
           merges + trivial > 0 ? `${merges + trivial} dropped (merge commits, typo fixes)` : "nothing dropped",
           normalized.unassigned.length > 0
             ? `${normalized.unassigned.length} not mapped to a member`
@@ -44,7 +53,7 @@ export function ScoringProgress({
       },
       {
         id: "judge",
-        label: `Judging ${items} items · 3 independent runs`,
+        label: `Judging ${items} items · ${runs} independent runs`,
         detail: [
           "impact and complexity, 1–5 each",
           "quiet work scored on the same scale as code",
@@ -62,7 +71,7 @@ export function ScoringProgress({
         detail: ["citing only the evidence it was given"],
       },
     ];
-  }, [project.contributions, project.members]);
+  }, [project]);
 
   // Estimated pacing while the request is in flight; never reaches the last step on its own.
   const [index, setIndex] = useState(0);
@@ -70,7 +79,7 @@ export function ScoringProgress({
     if (done || failed) return;
     const timer = window.setInterval(() => setIndex((i) => Math.min(i + 1, plan.length - 1)), 1100);
     return () => window.clearInterval(timer);
-  }, [done, failed, plan.length]);
+  }, [done, failed, plan]);
 
   const steps: AgentStep[] = plan.map((step, i) => ({
     ...step,

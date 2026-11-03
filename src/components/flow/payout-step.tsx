@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { AnimatePresence, LayoutGroup, motion, useReducedMotion } from "motion/react";
 import { ArrowLeft, Check, Clock, Copy, LayoutDashboard, ReceiptText } from "lucide-react";
 import confetti from "canvas-confetti";
@@ -38,6 +39,7 @@ export function PayoutStep({
   result: { batchId: string; simulated: boolean; message: string } | null;
 }) {
   const reduce = useReducedMotion();
+  const router = useRouter();
   const colors = useMemo(() => personColorByName(project.members), [project.members]);
   const lines = useMemo(() => payableAllocations(project, project.decisions), [project]);
   const totalCents = lines.reduce((sum, l) => sum + l.totalCents, 0);
@@ -47,8 +49,41 @@ export function PayoutStep({
   /** How many people's streams have landed so far. */
   const [landed, setLanded] = useState(alreadyPaid ? lines.length : 0);
   const timers = useRef<number[]>([]);
+  const redirectTimer = useRef<number | null>(null);
 
-  useEffect(() => () => timers.current.forEach((t) => window.clearTimeout(t)), []);
+  useEffect(
+    () => () => {
+      timers.current.forEach((t) => window.clearTimeout(t));
+      if (redirectTimer.current !== null) window.clearTimeout(redirectTimer.current);
+    },
+    []
+  );
+
+  // The receipt is the record of a paid project: once the payout has visibly
+  // settled, move there automatically instead of leaving the user on a
+  // completed payout screen. The pause lets the confirmation and confetti read.
+  //
+  // Next's client router keeps this page mounted during a transition, so a
+  // manual click on "Dashboard" doesn't unmount it (and doesn't cancel this
+  // effect) until the new route is ready — this timer could otherwise fire
+  // mid-transition and yank the user back to the receipt. cancelAutoRedirect,
+  // called from both buttons below, closes that race explicitly.
+  useEffect(() => {
+    if (stage !== "done") return;
+    const timer = window.setTimeout(() => {
+      redirectTimer.current = null;
+      router.replace(`/receipt/${project.id}`);
+    }, reduce ? 900 : 1800);
+    redirectTimer.current = timer;
+    return () => window.clearTimeout(timer);
+  }, [stage, reduce, router, project.id]);
+
+  function cancelAutoRedirect() {
+    if (redirectTimer.current !== null) {
+      window.clearTimeout(redirectTimer.current);
+      redirectTimer.current = null;
+    }
+  }
 
   async function pay() {
     const ok = await onPay();
@@ -245,6 +280,7 @@ export function PayoutStep({
               >
                 <Alert tone="success" title="Payout complete">
                   {result?.message ?? "Sandbox payout already sent. No live money moved."}
+                  <span className="mt-1 block text-xs opacity-80">Opening the receipt…</span>
                 </Alert>
                 {batchId && (
                   <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border px-4 py-3 text-sm">
@@ -265,12 +301,12 @@ export function PayoutStep({
                   </div>
                 )}
                 <div className="flex flex-wrap gap-2">
-                  <Link href={`/receipt/${project.id}`}>
+                  <Link href={`/receipt/${project.id}`} onClick={cancelAutoRedirect}>
                     <Button>
                       <ReceiptText className="size-4" /> Receipt
                     </Button>
                   </Link>
-                  <Link href={`/dashboard/${project.id}`}>
+                  <Link href={`/dashboard/${project.id}`} onClick={cancelAutoRedirect}>
                     <Button variant="outline">
                       <LayoutDashboard className="size-4" /> Dashboard
                     </Button>

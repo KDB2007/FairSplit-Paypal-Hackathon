@@ -1,10 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Plus } from "lucide-react";
+import { Plus, Search, X } from "lucide-react";
 import type { ProjectStatus, ProjectSummary } from "@/lib/types";
 import { fetchProjects } from "@/lib/client";
+import { DEMO_PROJECT_ID, isDemoProject } from "@/lib/project-links";
 import { cn } from "@/lib/utils";
 import { Alert, PageShell } from "@/components/ui";
 import { buttonVariants } from "@/components/ui/button";
@@ -18,10 +19,8 @@ const primaryLink = cn(
 );
 
 /** The in-memory store can outlive a mode switch, so hide the demo row in real mode. */
-const DEMO_ID = "demo";
-
 function visibleProjects(projects: ProjectSummary[], demoMode: boolean) {
-  return demoMode ? projects : projects.filter((project) => project.id !== DEMO_ID);
+  return demoMode ? projects : projects.filter((project) => !isDemoProject(project.id));
 }
 
 export function DashboardClient({ demoMode }: { demoMode: boolean }) {
@@ -29,6 +28,12 @@ export function DashboardClient({ demoMode }: { demoMode: boolean }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [stage, setStage] = useState<ProjectStatus | null>(null);
+  const [query, setQuery] = useState("");
+
+  const matching = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return q ? projects.filter((project) => project.name.toLowerCase().includes(q)) : projects;
+  }, [projects, query]);
 
   useEffect(() => {
     let active = true;
@@ -64,7 +69,7 @@ export function DashboardClient({ demoMode }: { demoMode: boolean }) {
         <div className="flex items-center gap-4">
           {demoMode && (
             <Link
-              href="/project/demo"
+              href={`/project/${DEMO_PROJECT_ID}`}
               className="text-sm text-muted-foreground transition-colors hover:text-foreground"
             >
               Try the demo
@@ -96,11 +101,40 @@ export function DashboardClient({ demoMode }: { demoMode: boolean }) {
             stage={stage}
             onStageChange={setStage}
           />
+
+          {projects.length > 5 && (
+            <div className="relative mt-12 max-w-xs">
+              <Search
+                className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground"
+                aria-hidden
+              />
+              <input
+                type="search"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search projects…"
+                aria-label="Search projects by name"
+                className="h-8 w-full rounded-md border border-input bg-transparent pl-8 pr-7 text-sm outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
+              />
+              {query && (
+                <button
+                  type="button"
+                  onClick={() => setQuery("")}
+                  aria-label="Clear search"
+                  className="absolute right-1.5 top-1/2 flex size-5 -translate-y-1/2 items-center justify-center rounded text-muted-foreground hover:text-foreground"
+                >
+                  <X className="size-3.5" />
+                </button>
+              )}
+            </div>
+          )}
+
           <ProjectRows
-            projects={projects}
+            projects={matching}
             stage={stage}
             onStageChange={setStage}
             onDeleted={load}
+            emptyLabel={query ? `No projects match “${query}”.` : undefined}
           />
           {demoMode && (
             <p className="mt-12 text-xs text-muted-foreground">

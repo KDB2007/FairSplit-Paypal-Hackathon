@@ -182,6 +182,10 @@ export interface ProjectSummary {
   split: Array<{ person: string; cents: number }> | null;
   /** Total actually paid out, in cents. */
   paidCents: number;
+  /** Whether a GitHub repo or Trello board is configured for this project. */
+  hasSources: boolean;
+  /** ISO timestamp of the last sync, if any has run. */
+  lastSyncAt: string | null;
 }
 
 export interface ScoreResult {

@@ -50,10 +50,18 @@ describe("assessConfidence", () => {
     expect(over.confidence).toBe("lower");
   });
 
-  it("handles a single run", () => {
+  it("treats a single run as lower confidence — there's nothing to compare it against", () => {
     const result = assessConfidence([run({ a: 100 })]);
-    expect(result.confidence).toBe("high");
+    expect(result.confidence).toBe("lower");
     expect(result.maxDeltaPct).toBe(0);
+  });
+
+  it("still requires agreement with exactly 2 usable runs", () => {
+    const agree = assessConfidence([run({ a: 40, b: 60 }), run({ a: 42, b: 58 })]);
+    expect(agree.confidence).toBe("high");
+
+    const disagree = assessConfidence([run({ a: 40, b: 60 }), run({ a: 50, b: 50 })]);
+    expect(disagree.confidence).toBe("lower");
   });
 
   it("does not crash on empty input", () => {
