@@ -103,3 +103,7 @@ Re-syncing updates items in place. Manual work is never touched.
   are still paid.
 - The demo-safe scoring engine is deterministic, so the demo looks the same every
   time even with no API keys and no network.
+
+## License
+
+MIT — see [LICENSE](./LICENSE).
