@@ -8,6 +8,10 @@ Built for the PayPal hackathon on Next.js 16 (App Router), TypeScript, Tailwind 
 Recharts and the OpenAI + PayPal APIs. No database, no auth — an in-memory store
 seeded with a demo project, designed to survive a live 3-minute demo.
 
+## Demo video
+
+[▶ Watch the FairSplit demo on YouTube](https://youtu.be/DqwqzeYyMyQ)
+
 ## Quick start
 
 ```bash
